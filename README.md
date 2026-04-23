@@ -15,12 +15,20 @@
 hawk-eval/
 ├── datasets/                  # 评测数据集
 │   ├── hawk_memory/          # 自研中文数据集
-│   │   ├── conversational_qa.jsonl    # 对话式记忆召回（对标 LoCoMo）
-│   │   └── procedural.jsonl           # 程序性记忆（对标 m_flow）
-│   ├── m_flow_procedural/    # m_flow procedural_eval_v1.jsonl
-│   └── locomo/               # LoCoMo 英文原版（Mem0 论文）
+│   │   ├── conversational_qa.jsonl    # 对话式记忆召回（200条，中文）
+│   │   └── procedural.jsonl           # 程序性记忆（30条，中文）
+│   ├── locomo/               # LoCoMo-10 英文原版（MIT，1540条）
+│   │   ├── locomo_qa.jsonl            # 主评测数据
+│   │   └── DATASET_INFO.json          # 数据集元信息
+│   ├── evolving_events/       # Evolving Events multi-hop（MIT，100条）
+│   │   ├── evolving_events_qa.jsonl
+│   │   └── DATASET_INFO.json
+│   └── m_flow_procedural/    # m_flow procedural 原版（MIT，20条）
 ├── src/
 │   ├── runner.py             # 评测引擎
+│   ├── benchmark_hawk.py            # hawk-memory-api recall benchmark
+│   ├── benchmark_locomo.py          # LoCoMo-10 recall benchmark（含 LLM-Judge + per-category）
+│   ├── benchmark_evolving_events.py # Evolving Events recall benchmark
 │   ├── metrics/              # 指标计算
 │   │   ├── recall.py         # MRR / Recall@K / NDCG
 │   │   ├── bleu.py           # BLEU Score
@@ -41,17 +49,23 @@ hawk-eval/
 ## 快速开始
 
 ```bash
-# 1. 跑 hawk-memory-api 的 recall benchmark
+# 1. 启动 hawk-memory-api（必须先启动）
+cd ~/repos/hawk-memory-api && ./run.sh
+
+# 2. 跑 hawk-memory-api recall benchmark（中文 200 条）
 make benchmark-hawk
 
-# 2. 和 m_flow 对比
-make benchmark-m-flow-compare
+# 3. 跑 LoCoMo-10 英文 recall benchmark（1540 条，mflow-benchmarks 同款）
+make benchmark-locomo
 
-# 3. 跑完整竞品对比
+# 4. 跑 Evolving Events multi-hop benchmark（100 条）
+make benchmark-evolving
+
+# 5. 跑 m_flow procedural benchmark
+make benchmark-m-flow
+
+# 6. 跑完整竞品对比
 make benchmark-all
-
-# 4. 本地服务必须先启动
-# hawk-memory-api: cd ~/repos/hawk-memory-api && ./run.sh
 ```
 
 ## 指标体系
@@ -65,12 +79,35 @@ make benchmark-all
 
 ## 数据集
 
-| 数据集 | 规模 | 来源 |
-|--------|------|------|
-| conversational_qa | 50条（目标200） | 自研中文 + 翻译 LoCoMo |
-| procedural | 30条（目标100） | 自研中文 + m_flow |
-| m_flow_procedural | 1条（目标用完原版） | m_flow 仓库 |
-| locomo | 使用原版 | Mem0 论文 |
+| 数据集 | 规模 | 来源 | 许可 |
+|--------|------|------|------|
+| hawk_memory/conversational_qa | 200 条（中文） | 自研 + 翻译 | 内部 |
+| hawk_memory/procedural | 30 条（中文） | 自研 | 内部 |
+| locomo/locomo_qa | **1540 条（英文）** | [snap-research/LoCoMo](https://github.com/snap-research/LoCoMo) | MIT |
+| evolving_events | **100 条（英文）** | [FlowElement-ai/mflow-benchmarks](https://github.com/FlowElement-ai/mflow-benchmarks) | MIT |
+| m_flow_procedural | 20 条（英文） | mflow-benchmarks | MIT |
+
+> 注：LoCoMo-10 原版 1986 条，排除 Category 5 (Adversarial，无 gold answer) 后 1540 条。
+> Evolving Events 数据来自 mflow-benchmarks，MIT License，可直接使用。
+
+### 竞品 Baseline（来源：mflow-benchmarks）
+
+**LoCoMo-10（LLM-Judge Accuracy, top-k=10）：**
+| 系统 | 分数 |
+|------|------|
+| M-flow | 81.8% |
+| Cognee Cloud | 79.4% |
+| Zep Cloud | 73.4% |
+| Supermemory | 64.4% |
+| Mem0 Cloud（官方） | 68.5% |
+| Mem0 Cloud（实测） | 50.4% |
+
+**Evolving Events（Human-like Correctness）：**
+| 系统 | k=5,gpt5-mini | k=10,gpt5.4 |
+|------|-------------|-------------|
+| M-flow | 95.8% | 97.7% |
+| Cognee | 88.6% | 93.0% |
+| Graphiti | 66.3% | 68.4% |
 
 ## CI Gate
 

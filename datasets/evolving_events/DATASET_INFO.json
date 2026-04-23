@@ -1,0 +1,24 @@
+{
+  "name": "Evolving Events",
+  "source": "https://github.com/FlowElement-ai/mflow-benchmarks (benchmarks/evolving-events/)",
+  "license": "MIT",
+  "description": "Multi-hop reasoning benchmark for episodic memory systems",
+  "total_qa": 100,
+  "categories": {
+    "multi-hop": 52,
+    "single-hop": 48
+  },
+  "format": {
+    "id": "string",
+    "question": "string",
+    "answer": "string",
+    "coarse": "string",
+    "is_multi_hop": "bool",
+    "tags": "list[string]"
+  },
+  "mflow_baseline": {
+    "mflow_topk5_gpt5mini_HL": 0.958,
+    "mflow_topk10_gpt54_HL": 0.977,
+    "source": "https://github.com/FlowElement-ai/mflow-benchmarks"
+  }
+}

@@ -1,4 +1,4 @@
-.PHONY: help test benchmark-hawk benchmark-m-flow benchmark-all compare install
+.PHONY: help test benchmark-hawk benchmark-hawk-proc benchmark-m-flow benchmark-locomo benchmark-evolving benchmark-all compare install
 
 PYTHON := python3
 PYTEST := pytest
@@ -55,6 +55,24 @@ benchmark-hawk-proc:
 		-t procedural \
 		-o reports/hawk_procedural_$(VERSION).json \
 		--verbose
+
+# ─── LoCoMo-10 Benchmark ───────────────────────────────────────────────────────
+
+benchmark-locomo:
+	@echo "[benchmark] LoCoMo-10 recall benchmark..."
+	@mkdir -p reports
+	@PYTHONPATH=src $(PYTHON) -m src.benchmark_locomo \
+		--dataset datasets/locomo/locomo_qa.jsonl \
+		--output reports/locomo_recall.json
+
+# ─── Evolving Events Benchmark ───────────────────────────────────────────────
+
+benchmark-evolving:
+	@echo "[benchmark] Evolving Events recall benchmark..."
+	@mkdir -p reports
+	@PYTHONPATH=src $(PYTHON) -m src.benchmark_evolving_events \
+		--dataset datasets/evolving_events/evolving_events_qa.jsonl \
+		--output reports/evolving_events_recall.json
 
 # ─── m_flow Benchmark ────────────────────────────────────────────────────────
 

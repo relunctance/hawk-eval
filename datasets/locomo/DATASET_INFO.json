@@ -1,0 +1,27 @@
+{
+  "name": "LoCoMo-10",
+  "source": "https://github.com/snap-research/LoCoMo",
+  "license": "MIT",
+  "description": "Evaluating Very Long-Term Conversational Memory of LLM Agents (arXiv:2402.17753)",
+  "total_qa": 1540,
+  "conversations": 10,
+  "categories": {
+    "Multi-hop": 282,
+    "Temporal": 321,
+    "Open-domain": 96,
+    "Single-hop": 841
+  },
+  "format": {
+    "id": "string",
+    "question": "string",
+    "answer": "string",
+    "category": "string",
+    "conv_id": "string"
+  },
+  "mflow_baseline": {
+    "system": "M-flow 0.3.2",
+    "llm_judge_accuracy": 0.818,
+    "top_k": 10,
+    "source": "https://github.com/FlowElement-ai/mflow-benchmarks"
+  }
+}
