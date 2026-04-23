@@ -53,8 +53,18 @@ def req(method, path, body=None, timeout=30):
 
 # ─── Text Similarity ─────────────────────────────────────────────────────────
 
+def _strip_prefix(t: str) -> str:
+    """去掉 capture 时添加的 \"用户: \" / \"助手: \" 前缀。"""
+    for p in ("用户: ", "助手: "):
+        if t.startswith(p):
+            return t[len(p):]
+    return t
+
+
 def text_similar(t1: str, t2: str, threshold: float = 0.6) -> bool:
-    """判断两个文本是否相似（token overlap > threshold）。"""
+    """判断两个文本是否相似（token overlap > threshold）。capture 前缀会在比对前自动去掉。"""
+    t1 = _strip_prefix(t1)
+    t2 = _strip_prefix(t2)
     words1 = set(t1.split())
     words2 = set(t2.split())
     if not words1 or not words2:

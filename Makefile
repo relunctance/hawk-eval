@@ -9,7 +9,9 @@ help:
 	@echo "hawk-eval — 三件套评测体系"
 	@echo ""
 	@echo "用法:"
-	@echo "  make test                 运行单元/集成测试"
+	@echo "  make test             运行 pytest 测试套件（12 项集成测试，~35s）"
+	@echo "  make test-smoke       快速冒烟测试（~15s，核心路径）"
+	@echo "  make test-self-check  自检脚本（无需网络）"
 	@echo "  make benchmark-hawk       跑 hawk-memory-api recall benchmark"
 	@echo "  make benchmark-hawk-proc  跑 hawk-memory-api procedural benchmark"
 	@echo "  make benchmark-m-flow     跑 m_flow procedural benchmark"
@@ -29,13 +31,16 @@ install:
 # ─── 测试 ────────────────────────────────────────────────────────────────────
 
 test:
-	@echo "[test] 运行 hawk-eval 测试..."
-	@$(PYTHON) -m pytest tests/ -v 2>/dev/null || echo "(pytest 未安装，使用 runner 自检)"
-	@$(PYTHON) -m src.runner \
-		-d datasets/hawk_memory/conversational_qa.jsonl \
-		-a hawk_memory_api \
-		-o reports/hawk_self_check.json \
-		--verbose
+	@echo "[test] 运行 hawk-eval 测试套件..."
+	@$(PYTHON) -m pytest tests/ -v --tb=short 2>&1
+
+test-smoke:
+	@echo "[test-smoke] 快速冒烟测试（<60s）..."
+	@$(PYTHON) -m pytest tests/test_hawk_memory_api.py -v --tb=short -k "health or capture_simple or recall_returns or no_500" 2>&1
+
+test-self-check:
+	@echo "[test] 自检脚本（无需网络）..."
+	@$(PYTHON) tests/test_runner.py 2>&1
 
 # ─── Hawk Memory API Benchmarks ───────────────────────────────────────────────
 
