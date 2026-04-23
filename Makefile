@@ -42,15 +42,14 @@ test:
 benchmark-hawk:
 	@echo "[benchmark] hawk-memory-api recall benchmark..."
 	@mkdir -p reports
-	@$(PYTHON) -m src.benchmark_hawk \
-		-d datasets/hawk_memory/conversational_qa.jsonl \
-		-o reports/hawk_recall_$(VERSION).json \
-		--verbose
+	@PYTHONPATH=src $(PYTHON) -m src.benchmark_hawk \
+		--dataset datasets/hawk_memory/conversational_qa.jsonl \
+		--output reports/hawk_recall_$(VERSION).json
 
 benchmark-hawk-proc:
 	@echo "[benchmark] hawk-memory-api procedural benchmark..."
 	@mkdir -p reports
-	@$(PYTHON) -m src.runner \
+	@PYTHONPATH=src $(PYTHON) -m src.runner \
 		-d datasets/hawk_memory/procedural.jsonl \
 		-a hawk_memory_api \
 		-t procedural \
@@ -62,7 +61,7 @@ benchmark-hawk-proc:
 benchmark-m-flow:
 	@echo "[benchmark] m_flow procedural benchmark..."
 	@mkdir -p reports
-	@$(PYTHON) -m src.runner \
+	@PYTHONPATH=src $(PYTHON) -m src.runner \
 		-d datasets/m_flow_procedural/procedural_eval_v1.jsonl \
 		-a m_flow \
 		-t procedural \
