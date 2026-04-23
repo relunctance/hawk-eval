@@ -210,6 +210,8 @@ def main():
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--limit", type=int, default=0,
                        help="只跑前N条（0=全部，用于快速迭代验证）")
+    parser.add_argument("--offset", type=int, default=0,
+                       help="从第几条开始跳过（0=从头，用于分批跑）")
     parser.add_argument("--host", default="http://127.0.0.1:18360")
     args = parser.parse_args()
 
@@ -229,6 +231,8 @@ def main():
 
     if args.limit > 0:
         dataset = dataset[:args.limit]
+    if args.offset > 0:
+        dataset = dataset[args.offset:]
 
     print(f"[benchmark] 数据集: {args.dataset} ({len(dataset)} 条)")
 
