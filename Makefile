@@ -42,9 +42,8 @@ test:
 benchmark-hawk:
 	@echo "[benchmark] hawk-memory-api recall benchmark..."
 	@mkdir -p reports
-	@$(PYTHON) -m src.runner \
+	@$(PYTHON) -m src.benchmark_hawk \
 		-d datasets/hawk_memory/conversational_qa.jsonl \
-		-a hawk_memory_api \
 		-o reports/hawk_recall_$(VERSION).json \
 		--verbose
 

@@ -23,10 +23,9 @@ from src.adapters import HawkMemoryAdapter, MFlowAdapter, Mem0Adapter, RAGBaseli
 
 ADAPTERS = {
     "hawk_memory_api": HawkMemoryAdapter,
-    "hawk_memory_api_http": lambda: HawkMemoryAdapter(base_url="http://127.0.0.1:18360"),
     "m_flow": MFlowAdapter,
     "mem0": Mem0Adapter,
-    "rag_baseline": lambda: RAGBaselineAdapter(),
+    "rag_baseline": RAGBaselineAdapter,
 }
 
 
@@ -35,9 +34,11 @@ def make_adapter(name: str, extra_args: dict = None) -> object:
     factory = ADAPTERS.get(name)
     if factory is None:
         raise ValueError(f"Unknown adapter: {name}. Available: {list(ADAPTERS.keys())}")
-    adapter = factory() if callable(factory) and not isinstance(factory, type) else factory
+    # 实例化：如果 extra_args 就用参数构造，否则用默认构造
     if extra_args:
         adapter = factory(**extra_args)
+    else:
+        adapter = factory()
     return adapter
 
 
