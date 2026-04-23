@@ -208,6 +208,8 @@ def main():
     parser.add_argument("--output", default="reports/hawk_recall.json",
                        help="Output report JSON path")
     parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument("--limit", type=int, default=0,
+                       help="只跑前N条（0=全部，用于快速迭代验证）")
     parser.add_argument("--host", default="http://127.0.0.1:18360")
     args = parser.parse_args()
 
@@ -224,6 +226,9 @@ def main():
                     dataset.append(json.loads(line))
                 except:
                     pass
+
+    if args.limit > 0:
+        dataset = dataset[:args.limit]
 
     print(f"[benchmark] 数据集: {args.dataset} ({len(dataset)} 条)")
 
