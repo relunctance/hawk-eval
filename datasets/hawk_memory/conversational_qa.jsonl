@@ -1,0 +1,25 @@
+{"id": "HM-001", "question": "我上次说想学 Python，现在学得怎么样了？", "answer": "你上周刚开始学，买了《Python编程：从入门到实践》这本书，打算从基础语法开始。", "category": "1"}
+{"id": "HM-002", "question": "我们上次讨论的那个 AI 项目叫什么来着？", "answer": "hawk-bridge，是 GQL 的记忆层项目，专注会话层记忆的存储和召回。", "category": "2"}
+{"id": "HM-003", "question": "用户偏好什么样的天气？", "answer": "用户喜欢晴天，不喜欢雨天出行。", "category": "1"}
+{"id": "HM-004", "question": "上次说要去的地方是哪里？", "answer": "上次说想去西藏拉萨，计划是坐火车去。", "category": "2"}
+{"id": "HM-005", "question": "用户的名字叫什么？", "answer": "用户叫 gql，或者叫 maomao，是 GQL 团队的一员。", "category": "3"}
+{"id": "HM-006", "question": "飞书怎么配置 webhook？", "answer": "飞书 webhook 需要在群设置里添加自定义机器人，复制 webhook URL 后用 POST 请求发送消息。", "category": "2"}
+{"id": "HM-007", "question": " hawk-memory-api 用什么端口？", "answer": "hawk-memory-api 默认使用 18360 端口。", "category": "3"}
+{"id": "HM-008", "question": "用户今天心情如何？", "answer": "用户今天心情不错，上午完成了 hawk-eval 的搭建。", "category": "1"}
+{"id": "HM-009", "question": "我们决定用哪个数据库？", "answer": "我们决定用 PostgreSQL + pgvector 作为向量存储，配合 Neo4j 做知识图谱。", "category": "2"}
+{"id": "HM-010", "question": "Python 里面怎么异步调用？", "answer": "Python 异步用 asyncio，配合 async/await 关键字。", "category": "3"}
+{"id": "HM-011", "question": "soul-engine 的定位是什么？", "answer": "soul-engine 是记忆进化引擎，负责从 Raw Memory 提炼 Pattern → Principle → Skill。", "category": "3"}
+{"id": "HM-012", "question": "上次说的那个电影叫什么？", "answer": "《星际穿越》，用户说想重温一遍诺兰的这部电影。", "category": "3"}
+{"id": "HM-013", "question": "我们下一步要做什么？", "answer": "下一步要搭建 hawk-eval 的测试体系，跑通 baseline 并对标 m_flow。", "category": "2"}
+{"id": "HM-014", "question": " hawk-bridge 和 hawk-memory-api 的关系？", "answer": "hawk-bridge 是 L0 记忆层，hawk-memory-api 是独立的记忆 API 服务，bridge 以后会调用 API。", "category": "3"}
+{"id": "HM-015", "question": "用户习惯用什么编程语言？", "answer": "用户主要用 Python，偶尔也用 TypeScript。", "category": "1"}
+{"id": "HM-016", "question": "Neo4j 的默认端口是什么？", "answer": "Neo4j 默认 HTTP 端口是 7474，Bolt 端口是 7687。", "category": "3"}
+{"id": "HM-017", "question": "Mem0 的 benchmark 分数是多少？", "answer": "Mem0 在 LoCoMo 上最新分数是 MRR 91.6，Bleu 71.4。", "category": "3"}
+{"id": "HM-018", "question": "用户一般什么时候工作？", "answer": "用户习惯下午和晚上工作，上午处理邮件和日程。", "category": "1"}
+{"id": "HM-019", "question": "m_flow 的 procedural recall 怎么评测？", "answer": "用 recall@K、trigger_accuracy、fp_inject_rate 三个指标来评测程序性记忆。", "category": "3"}
+{"id": "HM-020", "question": " hawk-memory-api 的存储引擎支持哪些？", "answer": "当前支持 PostgreSQL + pgvector（向量检索）和 Qdrant（向量检索），计划支持 Neo4j。", "category": "3"}
+{"id": "HM-021", "question": "我想喝点什么？", "answer": "你之前说过喜欢喝美式咖啡，不加糖。", "category": "1"}
+{"id": "HM-022", "question": "我们项目用的是什么协议？", "answer": "我们用 Apache-2.0 开源协议。", "category": "3"}
+{"id": "HM-023", "question": "怎么在 Python 里发起 HTTP 请求？", "answer": "可以用 requests 库，或者标准库的 urllib。", "category": "3"}
+{"id": "HM-024", "question": "用户的时区是哪个？", "answer": "用户在北京时区（UTC+8）。", "category": "3"}
+{"id": "HM-025", "question": "上次让我记得的事是什么？", "answer": "上次让你记得我偏好 Python 编程，主要用 hermes-agent 做开发。", "category": "1"}

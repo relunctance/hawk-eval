@@ -1,0 +1,10 @@
+{"id": "HP-001", "type": "explicit_procedure", "query": "怎么部署 hawk-memory-api 到服务器", "expect": {"should_trigger_procedural": true, "procedures": {"any_of_titles_contains": ["部署", "发布", "上线", "服务器"]}}, "notes": "显式询问部署流程"}
+{"id": "HP-002", "type": "explicit_procedure", "query": "数据库回滚的步骤是什么", "expect": {"should_trigger_procedural": true, "procedures": {"any_of_titles_contains": ["回滚", "数据库"]}}, "notes": "显式询问回滚步骤"}
+{"id": "HP-003", "type": "explicit_procedure", "query": "如何配置 Redis 缓存", "expect": {"should_trigger_procedural": true, "procedures": {"any_of_titles_contains": ["Redis", "缓存", "配置"]}}, "notes": "显式询问配置"}
+{"id": "HP-004", "type": "negative", "query": "今天天气怎么样", "expect": {"should_trigger_procedural": false}, "notes": "日常闲聊不应触发"}
+{"id": "HP-005", "type": "negative", "query": "晚上吃什么好", "expect": {"should_trigger_procedural": false}, "notes": "日常闲聊不应触发"}
+{"id": "HP-006", "type": "explicit_procedure", "query": "怎么备份 PostgreSQL 数据", "expect": {"should_trigger_procedural": true, "procedures": {"any_of_titles_contains": ["备份", "PostgreSQL", "数据库"]}}, "notes": "显式询问备份"}
+{"id": "HP-007", "type": "explicit_procedure", "query": "如何升级 Python 版本", "expect": {"should_trigger_procedural": true, "procedures": {"any_of_titles_contains": ["Python", "升级", "版本"]}}, "notes": "显式询问升级"}
+{"id": "HP-008", "type": "implicit_task", "query": "继续上次的部署工作", "expect": {"should_trigger_procedural": true, "procedures": {"any_of_titles_contains": ["部署", "继续"]}}, "notes": "隐式继续任务"}
+{"id": "HP-009", "type": "negative", "query": "西藏好玩吗", "expect": {"should_trigger_procedural": false}, "notes": "旅游询问不应触发"}
+{"id": "HP-010", "type": "explicit_procedure", "query": "怎么写一个 pytest 测试用例", "expect": {"should_trigger_procedural": true, "procedures": {"any_of_titles_contains": ["pytest", "测试", "用例"]}}, "notes": "显式询问测试"}
