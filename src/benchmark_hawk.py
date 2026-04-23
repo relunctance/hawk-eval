@@ -139,7 +139,7 @@ class HawkMemoryBenchmark:
             text = item.get("answer") or item.get("memory_text") or ""
             return bool(text and self.capture(text))
 
-        with ThreadPoolExecutor(max_workers=5) as ex:
+        with ThreadPoolExecutor(max_workers=2) as ex:
             caps = list(ex.map(do_capture, dataset))
         captured = sum(caps)
         print(f"      已 capture {captured}/{len(dataset)} 条")
@@ -171,7 +171,7 @@ class HawkMemoryBenchmark:
                               latency=latency, bleu1=bleu1, f1=f1)
 
         results: list[CaseResult] = []
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {executor.submit(do_recall, item, i): i
                        for i, item in enumerate(dataset)}
             done = 0
