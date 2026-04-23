@@ -20,11 +20,13 @@ import json
 import sys
 import time
 import uuid
+import urllib.request
+import urllib.error
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 
-from src.metrics import compute_recall_metrics, compute_text_metrics
+from metrics import compute_recall_metrics, compute_text_metrics
 
 
 # ─── HTTP ───────────────────────────────────────────────────────────────────
@@ -32,7 +34,7 @@ from src.metrics import compute_recall_metrics, compute_text_metrics
 BASE = "http://127.0.0.1:18360"
 
 
-def req(method, path, body=None, timeout=10):
+def req(method, path, body=None, timeout=30):
     url = BASE + path
     data = json.dumps(body).encode() if body else None
     headers = {"Content-Type": "application/json"}
@@ -119,55 +121,58 @@ class HawkMemoryBenchmark:
 
         dataset: list of {id, question, answer/memory_text}
         """
-        results: list[CaseResult] = []
-
-        # 1. 预先 capture 所有 target 记忆
+        # 1. 预先 capture 所有 target 记忆（并发）
         print(f"  [1] Capture {len(dataset)} 条记忆...")
-        captured = 0
-        for item in dataset:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def do_capture(item: dict) -> bool:
             text = item.get("answer") or item.get("memory_text") or ""
-            if text and self.capture(text):
-                captured += 1
-            time.sleep(0.05)
+            return bool(text and self.capture(text))
+
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            caps = list(ex.map(do_capture, dataset))
+        captured = sum(caps)
         print(f"      已 capture {captured}/{len(dataset)} 条")
         print(f"  [2] 等待索引就绪 (3s)...")
         time.sleep(3)
 
-        # 2. 对每个 query 做 recall
-        print(f"  [3] 开始 recall 评测...")
-        for i, item in enumerate(dataset):
+        # 2. 对每个 query 做 recall（并发）
+        print(f"  [3] 开始 recall 评测（并发）...")
+
+        def do_recall(item: dict, i: int) -> CaseResult:
             qid = item.get("id", f"q-{i}")
             query = item.get("question", "")
             target_text = item.get("answer") or item.get("memory_text", "")
-
             memories, latency = self.recall(query, top_k=top_k)
             retrieved_texts = [m.get("text", "") for m in memories]
-
-            # 文本匹配找 rank
             rank = None
             for pos, txt in enumerate(retrieved_texts):
                 if text_similar(txt, target_text):
                     rank = pos + 1
                     break
-
-            # BLEU/F1（top-1 vs target）
             bleu1 = 0.0
             f1 = 0.0
             if retrieved_texts and target_text:
                 tm = compute_text_metrics(retrieved_texts[0], target_text)
                 bleu1 = tm.get("bleu1", 0.0)
                 f1 = tm.get("f1", 0.0)
+            return CaseResult(query_id=qid, query=query, target_text=target_text,
+                              retrieved_texts=retrieved_texts, rank=rank,
+                              latency=latency, bleu1=bleu1, f1=f1)
 
-            results.append(CaseResult(
-                query_id=qid, query=query,
-                target_text=target_text,
-                retrieved_texts=retrieved_texts,
-                rank=rank, latency=latency,
-                bleu1=bleu1, f1=f1,
-            ))
+        results: list[CaseResult] = []
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(do_recall, item, i): i
+                       for i, item in enumerate(dataset)}
+            done = 0
+            for future in as_completed(futures):
+                results.append(future.result())
+                done += 1
+                if done % 20 == 0:
+                    print(f"      进度: {done}/{len(dataset)}")
 
-            if (i + 1) % 10 == 0:
-                print(f"      进度: {i+1}/{len(dataset)}")
+        # 保证顺序
+        results.sort(key=lambda r: int(r.query_id.split("-")[1]) if "-" in r.query_id else 0)
 
         # 3. 计算汇总指标
         metrics = compute_recall_metrics([
@@ -176,101 +181,80 @@ class HawkMemoryBenchmark:
             for r in results
         ], k_values=[1, 3, 5, 10])
 
-        # 用文本替代 ID 做 recall 输入
-        # compute_recall_metrics 内部用 target_id 匹配 retrieved_ids
-        # 由于 retrieved_ids 是文本列表，我们重新用 ranks 计算
-        ranks = [r.rank for r in results]
-        for k in [1, 3, 5, 10]:
-            hit = sum(1 for r in ranks if r is not None and r <= k)
-            metrics[f"recall@{k}"] = hit / len(ranks) if ranks else 0.0
-            if hit > 0:
-                mrr = sum(1.0 / r for r in ranks if r is not None and r <= k) / len(ranks)
-                metrics[f"mrr@{k}"] = mrr
+        # 添加文本指标汇总
+        metrics["bleu1_avg"] = sum(r.bleu1 for r in results) / len(results) if results else 0
+        metrics["f1_avg"] = sum(r.f1 for r in results) / len(results) if results else 0
+        metrics["latency_avg"] = sum(r.latency for r in results) / len(results) if results else 0
+        metrics["latency_p50"] = sorted(r.latency for r in results)[len(results)//2] if results else 0
 
-        # 文本质量
-        metrics["bleu1"] = sum(r.bleu1 for r in results) / len(results)
-        metrics["f1"] = sum(r.f1 for r in results) / len(results)
-
-        # 延迟
-        if self.latencies:
-            sorted_lat = sorted(self.latencies)
-            n = len(sorted_lat)
-            metrics["latency_p50"] = sorted_lat[int(n * 0.5)]
-            metrics["latency_p99"] = sorted_lat[int(n * 0.99)] if n > 1 else sorted_lat[0]
-            metrics["latency_mean"] = sum(sorted_lat) / n
-
+        print(f"  [4] 完成")
         return results, metrics
 
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="hawk-memory-api recall benchmark")
+    parser.add_argument("--dataset", default="datasets/hawk_memory/conversational_qa.jsonl",
+                       help="JSONL dataset path")
+    parser.add_argument("--output", default="reports/hawk_recall.json",
+                       help="Output report JSON path")
+    parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument("--host", default="http://127.0.0.1:18360")
+    args = parser.parse_args()
 
-# ─── 主程序 ─────────────────────────────────────────────────────────────────
+    import json
+    from pathlib import Path
 
-def load_jsonl(path: str) -> list[dict]:
-    items = []
-    with open(path, encoding="utf-8") as f:
+    # Load dataset
+    dataset = []
+    with open(args.dataset) as f:
         for line in f:
             line = line.strip()
             if line:
-                items.append(json.loads(line))
-    return items
+                try:
+                    dataset.append(json.loads(line))
+                except:
+                    pass
 
-
-def main():
-    parser = argparse.ArgumentParser(description="hawk-memory-api Recall Benchmark")
-    parser.add_argument("--dataset", "-d", required=True)
-    parser.add_argument("--output", "-o", default="reports/hawk_recall.json")
-    parser.add_argument("--top-k", "-k", type=int, default=10)
-    parser.add_argument("--verbose", "-v", action="store_true")
-    args = parser.parse_args()
-
-    dataset = load_jsonl(args.dataset)
     print(f"[benchmark] 数据集: {args.dataset} ({len(dataset)} 条)")
 
+    # Run
     bm = HawkMemoryBenchmark()
+    bm.host = args.host
+
     if not bm.health_check():
-        print("[benchmark] ✗ hawk-memory-api 不可用 (http://127.0.0.1:18360)")
-        print("             请先启动: cd ~/repos/hawk-memory-api && ./run.sh")
-        sys.exit(1)
-    print("[benchmark] ✓ hawk-memory-api 可用")
+        print("❌ hawk-memory-api health check failed")
+        return
 
-    t0 = time.time()
+    print("✅ hawk-memory-api health OK")
     results, metrics = bm.run(dataset, top_k=args.top_k)
-    elapsed = time.time() - t0
 
-    print(f"\n[结果]")
-    for k, v in metrics.items():
-        if isinstance(v, float):
-            print(f"  {k}: {v:.4f}")
-        else:
-            print(f"  {k}: {v}")
-
-    # 保存报告
+    # Save report
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     report = {
-        "timestamp": datetime.now().isoformat(),
-        "adapter": "hawk_memory_api",
         "dataset": args.dataset,
-        "elapsed_seconds": elapsed,
-        "n_cases": len(dataset),
+        "count": len(results),
         "metrics": metrics,
         "cases": [r.to_dict() for r in results],
     }
-
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    with open(args.output, "w", encoding="utf-8") as f:
+    with open(args.output, "w") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
+
+    # Print summary
+    print(f"\n{'='*50}")
+    print(f"  MRR@1:  {metrics.get('mrr@1', 0):.3f}")
+    print(f"  MRR@3:  {metrics.get('mrr@3', 0):.3f}")
+    print(f"  MRR@5:  {metrics.get('mrr@5', 0):.3f}")
+    print(f"  MRR@10: {metrics.get('mrr@10', 0):.3f}")
+    print(f"  Recall@1:  {metrics.get('recall@1', 0):.1%}")
+    print(f"  Recall@3:  {metrics.get('recall@3', 0):.1%}")
+    print(f"  Recall@5:  {metrics.get('recall@5', 0):.1%}")
+    print(f"  Recall@10: {metrics.get('recall@10', 0):.1%}")
+    print(f"  BLEU-1 avg: {metrics.get('bleu1_avg', 0):.3f}")
+    print(f"  F1 avg:      {metrics.get('f1_avg', 0):.3f}")
+    print(f"  Latency avg: {metrics.get('latency_avg', 0):.3f}s")
+    print(f"  Latency P50: {metrics.get('latency_p50', 0):.3f}s")
+    print(f"{'='*50}")
     print(f"\n报告已保存: {args.output}")
 
-    # 打印 rank > 10 的样例
-    missed = [r for r in results if r.rank is None]
-    if missed:
-        print(f"\n未命中 ({len(missed)} 条):")
-        for r in missed[:3]:
-            print(f"  Q: {r.query}")
-            print(f"  T: {r.target_text[:60]}")
-            print(f"  R: {r.retrieved_texts[:2]}")
-            print()
-
-
 if __name__ == "__main__":
-    import urllib.request
-    import urllib.error
     main()
