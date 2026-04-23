@@ -102,15 +102,13 @@ class HawkMemoryBenchmark:
         return s == 200 and data.get("status") == "ok"
 
     def capture_qa(self, question: str, answer: str) -> bool:
-        """存入一组 QA 记忆（question + answer 一起存，建立问答关联）。"""
+        """存入一组 QA 记忆（question → message, answer → response，建立问答关联）。"""
         session = f"bm-{uuid.uuid4().hex[:8]}"
-        # 把 question 和 answer 合并存入，这样 recall(question) 时能匹配到
-        message = f"用户: {question}\n助手: {answer}"
         body = {
             "session_id": session,
             "user_id": "benchmark",
-            "message": message,
-            "response": "",
+            "message": question,
+            "response": answer,
             "platform": self.platform,
         }
         data, s = req("POST", "/capture", body)
