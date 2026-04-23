@@ -101,8 +101,23 @@ class HawkMemoryBenchmark:
         data, s = req("GET", "/health")
         return s == 200 and data.get("status") == "ok"
 
+    def capture_qa(self, question: str, answer: str) -> bool:
+        """存入一组 QA 记忆（question + answer 一起存，建立问答关联）。"""
+        session = f"bm-{uuid.uuid4().hex[:8]}"
+        # 把 question 和 answer 合并存入，这样 recall(question) 时能匹配到
+        message = f"用户: {question}\n助手: {answer}"
+        body = {
+            "session_id": session,
+            "user_id": "benchmark",
+            "message": message,
+            "response": "",
+            "platform": self.platform,
+        }
+        data, s = req("POST", "/capture", body)
+        return s in (200, 201)
+
     def capture(self, text: str) -> bool:
-        """存入一条记忆。"""
+        """存入一条记忆（兼容旧接口）。"""
         session = f"bm-{uuid.uuid4().hex[:8]}"
         body = {
             "session_id": session,
@@ -125,29 +140,35 @@ class HawkMemoryBenchmark:
             return [], latency
         return data.get("memories", []), latency
 
-    def run(self, dataset: list[dict], top_k: int = 10) -> tuple[list[CaseResult], dict]:
+    def run(self, dataset: list[dict], top_k: int = 10,
+             log_fn=None) -> tuple[list[CaseResult], dict]:
         """
         运行 benchmark。
 
         dataset: list of {id, question, answer/memory_text}
+        log_fn: 日志函数，默认 print
         """
-        # 1. 预先 capture 所有 target 记忆（并发）
-        print(f"  [1] Capture {len(dataset)} 条记忆...")
+        if log_fn is None:
+            log_fn = print
+
+        # 1. 预先 capture 所有 target 记忆（并发=1，避免 API 过载）
+        log_fn(f"  [1] Capture {len(dataset)} 条记忆...")
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         def do_capture(item: dict) -> bool:
-            text = item.get("answer") or item.get("memory_text") or ""
-            return bool(text and self.capture(text))
+            question = item.get("question", "")
+            answer = item.get("answer") or item.get("memory_text") or ""
+            return bool(question and answer and self.capture_qa(question, answer))
 
-        with ThreadPoolExecutor(max_workers=2) as ex:
+        with ThreadPoolExecutor(max_workers=1) as ex:
             caps = list(ex.map(do_capture, dataset))
         captured = sum(caps)
-        print(f"      已 capture {captured}/{len(dataset)} 条")
-        print(f"  [2] 等待索引就绪 (3s)...")
+        log_fn(f"      已 capture {captured}/{len(dataset)} 条")
+        log_fn(f"  [2] 等待索引就绪 (3s)...")
         time.sleep(3)
 
-        # 2. 对每个 query 做 recall（并发）
-        print(f"  [3] 开始 recall 评测（并发）...")
+        # 2. 对每个 query 做 recall（并发=1，每批<30s）
+        log_fn(f"  [3] 开始 recall 评测（并发=1）...")
 
         def do_recall(item: dict, i: int) -> CaseResult:
             qid = item.get("id", f"q-{i}")
@@ -171,7 +192,7 @@ class HawkMemoryBenchmark:
                               latency=latency, bleu1=bleu1, f1=f1)
 
         results: list[CaseResult] = []
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=1) as executor:
             futures = {executor.submit(do_recall, item, i): i
                        for i, item in enumerate(dataset)}
             done = 0
@@ -179,7 +200,7 @@ class HawkMemoryBenchmark:
                 results.append(future.result())
                 done += 1
                 if done % 20 == 0:
-                    print(f"      进度: {done}/{len(dataset)}")
+                    log_fn(f"      进度: {done}/{len(dataset)}")
 
         # 保证顺序
         results.sort(key=lambda r: int(r.query_id.split("-")[1]) if "-" in r.query_id else 0)
@@ -203,7 +224,7 @@ class HawkMemoryBenchmark:
         metrics["latency_avg"] = sum(r.latency for r in results) / len(results) if results else 0
         metrics["latency_p50"] = sorted(r.latency for r in results)[len(results)//2] if results else 0
 
-        print(f"  [4] 完成")
+        log_fn(f"  [4] 完成")
         return results, metrics
 
 def main():
@@ -219,7 +240,27 @@ def main():
     parser.add_argument("--offset", type=int, default=0,
                        help="从第几条开始跳过（0=从头，用于分批跑）")
     parser.add_argument("--host", default="http://127.0.0.1:18360")
+    parser.add_argument("--log", default=None,
+                       help="日志文件路径（追加），不指定则只输出到 stdout")
     args = parser.parse_args()
+
+    # 设置日志输出（同时写文件 + stdout）
+    import logging, sys
+    log_handler = None
+    if args.log:
+        log_handler = logging.FileHandler(args.log, mode="a")
+        log_handler.setFormatter(logging.Formatter("%(message)s"))
+        root = logging.getLogger()
+        root.addHandler(log_handler)
+        root.setLevel(logging.INFO)
+        # 把 print 重定向到日志
+        def log_print(*a, **kw):
+            sep = kw.pop("sep", " ")
+            msg = sep.join(str(x) for x in a)
+            logging.info(msg)
+            print(*a, **kw)
+    else:
+        log_print = print
 
     import json
     from pathlib import Path
@@ -240,18 +281,20 @@ def main():
     if args.limit > 0:
         dataset = dataset[:args.limit]
 
-    print(f"[benchmark] 数据集: {args.dataset} ({len(dataset)} 条)")
+    log_print(f"[benchmark] 数据集: {args.dataset} ({len(dataset)} 条)")
 
     # Run
     bm = HawkMemoryBenchmark()
     bm.host = args.host
 
     if not bm.health_check():
-        print("❌ hawk-memory-api health check failed")
+        log_print("❌ hawk-memory-api health check failed")
+        if log_handler:
+            log_handler.close()
         return
 
-    print("✅ hawk-memory-api health OK")
-    results, metrics = bm.run(dataset, top_k=args.top_k)
+    log_print("✅ hawk-memory-api health OK")
+    results, metrics = bm.run(dataset, top_k=args.top_k, log_fn=log_print)
 
     # Save report
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
@@ -265,21 +308,25 @@ def main():
         json.dump(report, f, ensure_ascii=False, indent=2)
 
     # Print summary
-    print(f"\n{'='*50}")
-    print(f"  MRR@1:  {metrics.get('mrr@1', 0):.3f}")
-    print(f"  MRR@3:  {metrics.get('mrr@3', 0):.3f}")
-    print(f"  MRR@5:  {metrics.get('mrr@5', 0):.3f}")
-    print(f"  MRR@10: {metrics.get('mrr@10', 0):.3f}")
-    print(f"  Recall@1:  {metrics.get('recall@1', 0):.1%}")
-    print(f"  Recall@3:  {metrics.get('recall@3', 0):.1%}")
-    print(f"  Recall@5:  {metrics.get('recall@5', 0):.1%}")
-    print(f"  Recall@10: {metrics.get('recall@10', 0):.1%}")
-    print(f"  BLEU-1 avg: {metrics.get('bleu1_avg', 0):.3f}")
-    print(f"  F1 avg:      {metrics.get('f1_avg', 0):.3f}")
-    print(f"  Latency avg: {metrics.get('latency_avg', 0):.3f}s")
-    print(f"  Latency P50: {metrics.get('latency_p50', 0):.3f}s")
-    print(f"{'='*50}")
-    print(f"\n报告已保存: {args.output}")
+    log_print(f"\n{'='*50}")
+    log_print(f"  MRR@1:  {metrics.get('mrr@1', 0):.3f}")
+    log_print(f"  MRR@3:  {metrics.get('mrr@3', 0):.3f}")
+    log_print(f"  MRR@5:  {metrics.get('mrr@5', 0):.3f}")
+    log_print(f"  MRR@10: {metrics.get('mrr@10', 0):.3f}")
+    log_print(f"  Recall@1:  {metrics.get('recall@1', 0):.1%}")
+    log_print(f"  Recall@3:  {metrics.get('recall@3', 0):.1%}")
+    log_print(f"  Recall@5:  {metrics.get('recall@5', 0):.1%}")
+    log_print(f"  Recall@10: {metrics.get('recall@10', 0):.1%}")
+    log_print(f"  BLEU-1 avg: {metrics.get('bleu1_avg', 0):.3f}")
+    log_print(f"  F1 avg:      {metrics.get('f1_avg', 0):.3f}")
+    log_print(f"  Latency avg: {metrics.get('latency_avg', 0):.3f}s")
+    log_print(f"  Latency P50: {metrics.get('latency_p50', 0):.3f}s")
+    log_print(f"{'='*50}")
+    log_print(f"\n报告已保存: {args.output}")
+
+    if log_handler:
+        log_handler.close()
+        logging.getLogger().removeHandler(log_handler)
 
 if __name__ == "__main__":
     main()
