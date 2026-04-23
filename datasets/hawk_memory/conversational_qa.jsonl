@@ -182,7 +182,8 @@
 {"id": "HM-181", "question": "为什么有些记忆越来越难被 recall 到", "answer": "记忆可用性衰减", "category": "10"}
 {"id": "HM-182", "question": "有没有办法手动调整某条记忆的重要性", "answer": "重要性手动设置", "category": "10"}
 {"id": "HM-183", "question": "记忆的生命周期状态机是怎么流转的", "answer": "记忆状态流转", "category": "10"}
-{"id": "HM-184", "question": "我之前测试的那个 case 通过了吗", "answer": "测试结果查询", "category": "10"}{"id": "HM-185", "question": "我们上次讨论的 recall 优化方案具体是哪三个", "answer": "优化方案回顾", "category": "3"}
+{"id": "HM-184", "question": "我之前测试的那个 case 通过了吗", "answer": "测试结果查询", "category": "10"}
+{"id": "HM-185", "question": "我们上次讨论的 recall 优化方案具体是哪三个", "answer": "优化方案回顾", "category": "3"}
 {"id": "HM-186", "question": "hawk-memory-api 的 Recall Suppression 是怎么设计的", "answer": "可见性控制设计", "category": "4"}
 {"id": "HM-187", "question": "我之前让你查的那个函数实现还在吗", "answer": "代码实现回忆", "category": "5"}
 {"id": "HM-188", "question": "hawk-memory-api 的 Decay Worker 是独立进程吗", "answer": "Decay架构设计", "category": "4"}

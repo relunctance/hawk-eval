@@ -54,11 +54,22 @@ def req(method, path, body=None, timeout=30):
 # ─── Text Similarity ─────────────────────────────────────────────────────────
 
 def _strip_prefix(t: str) -> str:
-    """去掉 capture 时添加的 \"用户: \" / \"助手: \" 前缀。"""
-    for p in ("用户: ", "助手: "):
+    """去掉 capture 存储格式的前缀，只保留核心内容（answer）。
+
+    所有格式统一处理：取最后一个换行之后的内容，再去掉角色前缀。
+    - "用户: question\n助手: answer" → "助手: answer" → "answer"
+    - "question\nanswer" → "answer"
+    - "助手: answer" → "answer"
+    - "用户: 用户: question\n助手: answer" → "answer"
+    """
+    # 取最后一个换行之后的内容（去掉 question 行）
+    if "\n" in t:
+        t = t.split("\n")[-1]
+    # 去掉角色前缀
+    for p in ("用户: ", "助手: ", "User: ", "Assistant: "):
         if t.startswith(p):
-            return t[len(p):]
-    return t
+            t = t[len(p):]
+    return t.strip()
 
 
 def text_similar(t1: str, t2: str, threshold: float = 0.6) -> bool:
