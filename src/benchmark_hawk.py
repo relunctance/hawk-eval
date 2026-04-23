@@ -21,10 +21,8 @@ hawk-memory-api Recall Benchmark
 """
 
 import argparse
-import asyncio
-import hashlib
 import json
-import sqlite3
+import sys
 import time
 import uuid
 import urllib.request
@@ -34,192 +32,16 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 
-import httpx
-
 from metrics import compute_recall_metrics, compute_text_metrics
-
-# ─── Embedding Precompute ───────────────────────────────────────────────────
-
-# xinference endpoint (same as hawk-memory-api uses)
-_XINFERENCE_BASE = "http://127.0.0.1:9997/v1"
-_XINFERENCE_MODEL = "bge-m3"
-
-# SQLite cache path
-_CACHE_DB = Path.home() / ".hermes" / "hawk_eval_cache.db"
-
-
-def _dataset_hash(dataset: list[dict]) -> str:
-    """Dataset fingerprint — includes all question/answer pairs."""
-    canonical = json.dumps(
-        [{"id": d.get("id", ""), "question": d.get("question", ""), "answer": d.get("answer", "") or d.get("memory_text", "")}
-         for d in dataset],
-        sort_keys=True,
-    )
-    return hashlib.md5(canonical.encode()).hexdigest()[:12]
-
-
-class EmbedCache:
-    """
-    SQLite-backed embedding cache.
-    Schema:
-      cache(dataset_hash TEXT, query_id TEXT, query_text TEXT,
-            embedding BLOB, created_at REAL, PRIMARY KEY(dataset_hash, query_id))
-    """
-
-    def __init__(self, db_path: Path = _CACHE_DB):
-        self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
-
-    def _init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS embed_cache (
-                    dataset_hash TEXT,
-                    query_id    TEXT,
-                    query_text  TEXT,
-                    embedding   BLOB,
-                    created_at  REAL,
-                    PRIMARY KEY (dataset_hash, query_id)
-                )
-            """)
-
-    def get(self, dataset_hash: str, query_id: str) -> list[float] | None:
-        """Return embedding list[float] or None if not cached."""
-        with sqlite3.connect(self.db_path) as conn:
-            row = conn.execute(
-                "SELECT embedding FROM embed_cache WHERE dataset_hash=? AND query_id=?",
-                (dataset_hash, query_id)
-            ).fetchone()
-        if row:
-            import pickle
-            return pickle.loads(row[0])
-        return None
-
-    def get_batch(self, dataset_hash: str, query_ids: list[str]) -> dict[str, list[float] | None]:
-        """Return {query_id: embedding or None} for the given ids."""
-        placeholders = ",".join("?" * len(query_ids))
-        with sqlite3.connect(self.db_path) as conn:
-            rows = conn.execute(
-                f"SELECT query_id, embedding FROM embed_cache WHERE dataset_hash=? AND query_id IN ({placeholders})",
-                [dataset_hash] + query_ids
-            ).fetchall()
-        result = {qid: None for qid in query_ids}
-        import pickle
-        for qid, emb in rows:
-            result[qid] = pickle.loads(emb)
-        return result
-
-    def put(self, dataset_hash: str, query_id: str, query_text: str, embedding: list[float]):
-        """Store one embedding."""
-        import pickle
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                INSERT OR REPLACE INTO embed_cache
-                    (dataset_hash, query_id, query_text, embedding, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (dataset_hash, query_id, query_text, pickle.dumps(embedding), time.time()))
-
-    def put_batch(self, dataset_hash: str, items: list[dict]):
-        """Store multiple embeddings. items = [{query_id, query_text, embedding}, ...]"""
-        import pickle
-        now = time.time()
-        with sqlite3.connect(self.db_path) as conn:
-            conn.executemany("""
-                INSERT OR REPLACE INTO embed_cache
-                    (dataset_hash, query_id, query_text, embedding, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, [(dataset_hash, it["query_id"], it["query_text"],
-                   pickle.dumps(it["embedding"]), now) for it in items])
-
-    def has_all(self, dataset_hash: str, query_ids: list[str]) -> bool:
-        """Check whether all query_ids are cached for this dataset_hash."""
-        placeholders = ",".join("?" * len(query_ids))
-        with sqlite3.connect(self.db_path) as conn:
-            count = conn.execute(
-                f"SELECT COUNT(*) FROM embed_cache WHERE dataset_hash=? AND query_id IN ({placeholders})",
-                [dataset_hash] + query_ids
-            ).fetchone()[0]
-        return count == len(query_ids)
-
-    def clear(self, dataset_hash: str):
-        """Delete all entries for a dataset_hash."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM embed_cache WHERE dataset_hash=?", (dataset_hash,))
-
-
-async def precompute_query_embeddings(
-    queries: list[str],
-    dataset_hash: str,
-    query_ids: list[str],
-    log_fn=None,
-) -> list[list[float] | None]:
-    """
-    Pre-compute embeddings for a list of query strings using xinference directly.
-    Uses SQLite cache — skips already-cached queries.
-    Returns list of embedding vectors (None for skipped/already-cached).
-    """
-    if log_fn is None:
-        log_fn = lambda *a, **k: None
-
-    cache = EmbedCache()
-
-    # Check which are already cached
-    cached = cache.get_batch(dataset_hash, query_ids)
-    missing_indices = [i for i, qid in enumerate(query_ids) if cached.get(qid) is None]
-    missing_ids = [query_ids[i] for i in missing_indices]
-
-    log_fn(f"  [embed] {len(queries)} 条 query，SQLite 缓存命中 {len(queries)-len(missing_ids)}/{len(queries)}")
-
-    results: list[list[float] | None] = [None] * len(queries)
-
-    # Fill in cached values
-    for i, qid in enumerate(query_ids):
-        if cached.get(qid) is not None:
-            results[i] = cached[qid]
-
-    if missing_ids:
-        log_fn(f"  [embed] 需预计算 {len(missing_ids)} 条 embedding...")
-
-        async def _embed_one(text: str, qid: str, idx: int) -> tuple[int, list[float]]:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                t0 = time.time()
-                resp = await client.post(
-                    f"{_XINFERENCE_BASE}/embeddings",
-                    json={"model": _XINFERENCE_MODEL, "input": text},
-                )
-                vec = resp.json()["data"][0]["embedding"]
-                log_fn(f"      [{idx+1}/{len(missing_ids)}] {text[:20]:20s} {time.time()-t0:.2f}s")
-                return idx, vec
-
-        tasks = [_embed_one(queries[i], query_ids[i], j) for j, i in enumerate(missing_indices)]
-        pending = {j: query_ids[i] for j, i in enumerate(missing_indices)}
-        store_items = []
-
-        for coro in asyncio.as_completed(tasks):
-            idx, vec = await coro
-            orig_i = missing_indices[idx]
-            results[orig_i] = vec
-            store_items.append({
-                "query_id": pending[idx],
-                "query_text": queries[orig_i],
-                "embedding": vec,
-            })
-
-        # Batch persist to SQLite
-        cache.put_batch(dataset_hash, store_items)
-        log_fn(f"      已写入 SQLite {len(store_items)} 条")
-
-    return results
 
 
 # ─── HTTP ───────────────────────────────────────────────────────────────────
 
-BASE = "http://127.0.0.1:18360"  # default for HawkMemoryBenchmark.__init__
+BASE = "http://127.0.0.1:18360"
 
 
-def req(base_url, method, path, body=None, timeout=30):
-    url = base_url.rstrip("/") + path
+def req(method, path, body=None, timeout=30):
+    url = BASE + path
     data = json.dumps(body).encode() if body else None
     headers = {"Content-Type": "application/json"}
     req_ = urllib.request.Request(url, data=data, headers=headers, method=method)
@@ -288,13 +110,12 @@ class CaseResult:
 class HawkMemoryBenchmark:
     """hawk-memory-api recall benchmark。"""
 
-    def __init__(self, platform: str = "benchmark", base_url: str = BASE):
+    def __init__(self, platform: str = "benchmark"):
         self.platform = platform
-        self.base_url = base_url
         self.latencies: list[float] = []
 
     def health_check(self) -> bool:
-        data, s = req(self.base_url, "GET", "/health")
+        data, s = req("GET", "/health")
         return s == 200 and data.get("status") == "ok"
 
     def capture_qa(self, question: str, answer: str) -> bool:
@@ -307,7 +128,7 @@ class HawkMemoryBenchmark:
             "response": answer,
             "platform": self.platform,
         }
-        data, s = req(self.base_url, "POST", "/capture", body)
+        data, s = req("POST", "/capture", body)
         return s in (200, 201)
 
     def capture(self, text: str) -> bool:
@@ -320,39 +141,31 @@ class HawkMemoryBenchmark:
             "response": "",
             "platform": self.platform,
         }
-        data, s = req(self.base_url, "POST", "/capture", body)
+        data, s = req("POST", "/capture", body)
         return s in (200, 201)
 
-    def recall(self, query: str, top_k: int = 10,
-               query_vector: list[float] = None) -> tuple[list[dict], float]:
-        """recall，返回 (memories, latency)。query_vector 有则跳过 embed。"""
+    def recall(self, query: str, top_k: int = 10) -> tuple[list[dict], float]:
+        """recall，返回 (memories, latency)。"""
         body = {"query": query, "top_k": top_k, "platform": self.platform}
-        if query_vector is not None:
-            body["query_vector"] = query_vector
         t0 = time.perf_counter()
-        data, s = req(self.base_url, "POST", "/recall", body)
+        data, s = req("POST", "/recall", body)
         latency = time.perf_counter() - t0
         self.latencies.append(latency)
         if s != 200:
             return [], latency
         return data.get("memories", []), latency
 
-    def capture_dataset(self, dataset: list[dict], log_fn=None) -> str:
-        """Phase 1: capture 数据集，返回 dataset_hash（embed 已写入 SQLite）。
+    def capture_dataset(self, dataset: list[dict], log_fn=None) -> dict:
+        """Phase 1: capture 数据集，返回 session 文件内容供 recall 使用。
 
-        dataset_hash 用于 recall 阶段加载 embeddings。
+        Returns: {
+            "platform": str,
+            "count": int,
+            "items": [{"id": str, "question": str, "answer": str}, ...]
+        }
         """
         if log_fn is None:
             log_fn = print
-
-        # Build items before capture (needed for dataset_hash)
-        items = [
-            {"id": item.get("id", f"q-{i}"),
-             "question": item.get("question", ""),
-             "answer": item.get("answer") or item.get("memory_text", "")}
-            for i, item in enumerate(dataset)
-        ]
-        dataset_hash = _dataset_hash(items)
 
         log_fn(f"  [capture] {len(dataset)} 条记忆...")
         ok = 0
@@ -368,17 +181,20 @@ class HawkMemoryBenchmark:
         log_fn(f"  [capture] 等待索引就绪 (3s)...")
         time.sleep(3)
 
-        # 预计算 query embeddings（写入 SQLite）
-        queries = [item.get("question", "") for item in dataset if item.get("question")]
-        query_ids = [item.get("id", f"q-{i}") for i, item in enumerate(dataset) if item.get("question")]
-        asyncio.run(precompute_query_embeddings(queries, dataset_hash, query_ids, log_fn=log_fn))
-
-        return dataset_hash
+        return {
+            "platform": self.platform,
+            "count": ok,
+            "items": [
+                {"id": item.get("id", f"q-{i}"),
+                 "question": item.get("question", ""),
+                 "answer": item.get("answer") or item.get("memory_text", "")}
+                for i, item in enumerate(dataset)
+            ],
+        }
 
     def recall_eval(self, dataset: list[dict], top_k: int = 10,
-                    embeddings: list[list[float]] = None,
                     log_fn=None) -> tuple[list[CaseResult], dict]:
-        """Phase 2: 只跑 recall，不 capture。embeddings 有则预计算好，直接传给 API。"""
+        """Phase 2: 只跑 recall，不 capture。"""
         if log_fn is None:
             log_fn = print
 
@@ -388,8 +204,7 @@ class HawkMemoryBenchmark:
             qid = item.get("id", f"q-{i}")
             query = item.get("question", "")
             target_text = item.get("answer") or item.get("memory_text", "")
-            query_vec = embeddings[i] if (embeddings and i < len(embeddings)) else None
-            memories, latency = self.recall(query, top_k=top_k, query_vector=query_vec)
+            memories, latency = self.recall(query, top_k=top_k)
             retrieved_texts = [m.get("text", "") for m in memories]
             rank = None
             for pos, txt in enumerate(retrieved_texts):
@@ -407,7 +222,7 @@ class HawkMemoryBenchmark:
                               latency=latency, bleu1=bleu1, f1=f1)
 
         results: list[CaseResult] = []
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=1) as executor:
             futures = {executor.submit(do_recall, item, i): i
                        for i, item in enumerate(dataset)}
             done = 0
@@ -477,12 +292,12 @@ def main():
                        help="只跑前N条（0=全部）")
     parser.add_argument("--offset", type=int, default=0,
                        help="从第几条开始跳过（0=从头）")
+    parser.add_argument("--host", default="http://127.0.0.1:18360")
     parser.add_argument("--mode", default="both",
                        choices=["capture", "recall", "both"],
                        help="capture=只 capture 数据集；recall=只评测 recall；both=两者都做（默认）")
-    parser.add_argument("--host", default="http://127.0.0.1:18360",
-                       help="hawk-memory-api base URL")
-
+    parser.add_argument("--session-file",
+                       help="capture/recall 共享的 session 文件路径（Phase 间传递数据）")
     args = parser.parse_args()
 
     log_print = print
@@ -503,18 +318,9 @@ def main():
     if args.limit > 0:
         dataset = dataset[:args.limit]
 
-    # Compute dataset_hash (used for SQLite embedding cache key)
-    items = [
-        {"id": d.get("id", f"q-{i}"),
-         "question": d.get("question", ""),
-         "answer": d.get("answer") or d.get("memory_text", "")}
-        for i, d in enumerate(dataset)
-    ]
-    dataset_hash = _dataset_hash(items)
-
     log_print(f"[benchmark] 数据集: {args.dataset} ({len(dataset)} 条)  mode={args.mode}")
 
-    bm = HawkMemoryBenchmark(base_url=args.host)
+    bm = HawkMemoryBenchmark()
 
     if not bm.health_check():
         log_print("❌ hawk-memory-api health check failed")
@@ -525,37 +331,26 @@ def main():
     results = []
     metrics = {}
 
-    if args.mode in ("capture", "both"):
-        bm.capture_dataset(dataset, log_fn=log_print)
+    if args.mode == "capture":
+        session_data = bm.capture_dataset(dataset, log_fn=log_print)
+        if args.session_file:
+            Path(args.session_file).parent.mkdir(parents=True, exist_ok=True)
+            with open(args.session_file, "w") as f:
+                json.dump(session_data, f, ensure_ascii=False, indent=2)
+            log_print(f"✅ session 已保存: {args.session_file}")
 
-    if args.mode in ("recall", "both"):
-        # Load embeddings from SQLite cache
-        cache = EmbedCache()
-        query_ids = [item.get("id", f"q-{i}") for i, item in enumerate(dataset)]
-        cached_emb = cache.get_batch(dataset_hash, query_ids)
-        embeddings = [cached_emb.get(qid) for qid in query_ids]
+    if args.mode == "recall":
+        # recall-only: load from session file if provided
+        if args.session_file:
+            with open(args.session_file) as f:
+                session_data = json.load(f)
+            dataset = session_data["items"]
+            log_print(f"[recall] 从 session 加载 {len(dataset)} 条（忽略 --offset/--limit）")
+        results, metrics = bm.recall_eval(dataset, top_k=args.top_k, log_fn=log_print)
 
-        hit = sum(1 for e in embeddings if e is not None)
-        log_print(f"[recall] SQLite embedding 缓存命中 {hit}/{len(embeddings)}")
-        if hit < len(embeddings):
-            # Re-compute missing embeddings
-            missing = [i for i, e in enumerate(embeddings) if e is None]
-            log_print(f"[recall] 缺失 {len(missing)} 条，重新预计算...")
-            missing_queries = [dataset[i].get("question", "") for i in missing]
-            missing_ids = [query_ids[i] for i in missing]
-            import asyncio as _asyncio
-            new_embs = _asyncio.run(
-                precompute_query_embeddings(missing_queries, dataset_hash, missing_ids, log_fn=log_print)
-            )
-            for mi, idx in enumerate(missing):
-                embeddings[idx] = new_embs[mi]
-            cache.put_batch(dataset_hash, [
-                {"query_id": missing_ids[mi], "query_text": missing_queries[mi], "embedding": new_embs[mi]}
-                for mi in range(len(missing))
-            ])
-
-        results, metrics = bm.recall_eval(dataset, top_k=args.top_k,
-                                          embeddings=embeddings, log_fn=log_print)
+    if args.mode == "both":
+        # run() handles capture + recall internally
+        results, metrics = bm.run(dataset, top_k=args.top_k, log_fn=log_print)
 
     if not results and metrics:
         log_print("\n（capture-only 模式，无评测结果）")
