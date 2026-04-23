@@ -9,10 +9,15 @@ hawk-memory-api Recall Benchmark
 4. 检查 target answer 是否在返回结果中（文本相似度匹配）
 5. 计算 MRR / Recall@K / BLEU / F1 / Latency
 
-用法:
-    python -m src.benchmark_hawk \
-        --dataset datasets/hawk_memory/conversational_qa.jsonl \
-        --output reports/hawk_recall.json
+两阶段用法（推荐，用于快速迭代）：
+  # Phase 1: capture 数据集（只跑一次）
+  python -m src.benchmark_hawk --mode capture --dataset ... --session-file sessions/my.jsonl
+
+  # Phase 2: recall 评测（可跑多次，修改 top-k 等参数）
+  python -m src.benchmark_hawk --mode recall --dataset ... --session-file sessions/my.jsonl --top-k 5
+
+  # 合并模式（保留原有行为）
+  python -m src.benchmark_hawk --mode both --dataset ... --output reports/...
 """
 
 import argparse
@@ -22,6 +27,7 @@ import time
 import uuid
 import urllib.request
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
@@ -149,35 +155,50 @@ class HawkMemoryBenchmark:
             return [], latency
         return data.get("memories", []), latency
 
-    def run(self, dataset: list[dict], top_k: int = 10,
-             log_fn=None) -> tuple[list[CaseResult], dict]:
-        """
-        运行 benchmark。
+    def capture_dataset(self, dataset: list[dict], log_fn=None) -> dict:
+        """Phase 1: capture 数据集，返回 session 文件内容供 recall 使用。
 
-        dataset: list of {id, question, answer/memory_text}
-        log_fn: 日志函数，默认 print
+        Returns: {
+            "platform": str,
+            "count": int,
+            "items": [{"id": str, "question": str, "answer": str}, ...]
+        }
         """
         if log_fn is None:
             log_fn = print
 
-        # 1. 预先 capture 所有 target 记忆（并发=1，避免 API 过载）
-        log_fn(f"  [1] Capture {len(dataset)} 条记忆...")
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        def do_capture(item: dict) -> bool:
+        log_fn(f"  [capture] {len(dataset)} 条记忆...")
+        ok = 0
+        for i, item in enumerate(dataset):
             question = item.get("question", "")
             answer = item.get("answer") or item.get("memory_text") or ""
-            return bool(question and answer and self.capture_qa(question, answer))
-
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            caps = list(ex.map(do_capture, dataset))
-        captured = sum(caps)
-        log_fn(f"      已 capture {captured}/{len(dataset)} 条")
-        log_fn(f"  [2] 等待索引就绪 (3s)...")
+            if question and answer:
+                self.capture_qa(question, answer)
+                ok += 1
+            if (i + 1) % 20 == 0:
+                log_fn(f"      进度: {i+1}/{len(dataset)}")
+        log_fn(f"      已 capture {ok}/{len(dataset)} 条")
+        log_fn(f"  [capture] 等待索引就绪 (3s)...")
         time.sleep(3)
 
-        # 2. 对每个 query 做 recall（并发=1，每批<30s）
-        log_fn(f"  [3] 开始 recall 评测（并发=1）...")
+        return {
+            "platform": self.platform,
+            "count": ok,
+            "items": [
+                {"id": item.get("id", f"q-{i}"),
+                 "question": item.get("question", ""),
+                 "answer": item.get("answer") or item.get("memory_text", "")}
+                for i, item in enumerate(dataset)
+            ],
+        }
+
+    def recall_eval(self, dataset: list[dict], top_k: int = 10,
+                    log_fn=None) -> tuple[list[CaseResult], dict]:
+        """Phase 2: 只跑 recall，不 capture。"""
+        if log_fn is None:
+            log_fn = print
+
+        log_fn(f"  [recall] 评测 {len(dataset)} 条...")
 
         def do_recall(item: dict, i: int) -> CaseResult:
             qid = item.get("id", f"q-{i}")
@@ -212,9 +233,10 @@ class HawkMemoryBenchmark:
                     log_fn(f"      进度: {done}/{len(dataset)}")
 
         # 保证顺序
-        results.sort(key=lambda r: int(r.query_id.split("-")[1]) if "-" in r.query_id else 0)
+        results.sort(key=lambda r: int(r.query_id.split("-")[1])
+                     if "-" in r.query_id else 0)
 
-        # 3. 计算汇总指标（retrieved_texts 有 "用户: " / "助手: " 前缀，需要去掉才能匹配 target_text）
+        # 计算汇总指标
         def _strip(t: str) -> str:
             for p in ("用户: ", "助手: "):
                 if t.startswith(p):
@@ -227,17 +249,39 @@ class HawkMemoryBenchmark:
             for r in results
         ], k_values=[1, 3, 5, 10])
 
-        # 添加文本指标汇总
         metrics["bleu1_avg"] = sum(r.bleu1 for r in results) / len(results) if results else 0
         metrics["f1_avg"] = sum(r.f1 for r in results) / len(results) if results else 0
         metrics["latency_avg"] = sum(r.latency for r in results) / len(results) if results else 0
         metrics["latency_p50"] = sorted(r.latency for r in results)[len(results)//2] if results else 0
 
-        log_fn(f"  [4] 完成")
         return results, metrics
 
+    def run(self, dataset: list[dict], top_k: int = 10,
+             log_fn=None) -> tuple[list[CaseResult], dict]:
+        """
+        运行 benchmark（合并模式，等同于 capture + recall）。
+        """
+        if log_fn is None:
+            log_fn = print
+
+        log_fn(f"  [1] Capture {len(dataset)} 条记忆...")
+
+        def do_capture(item: dict) -> bool:
+            question = item.get("question", "")
+            answer = item.get("answer") or item.get("memory_text") or ""
+            return bool(question and answer and self.capture_qa(question, answer))
+
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            caps = list(ex.map(do_capture, dataset))
+        captured = sum(caps)
+        log_fn(f"      已 capture {captured}/{len(dataset)} 条")
+        log_fn(f"  [2] 等待索引就绪 (3s)...")
+        time.sleep(3)
+
+        return self.recall_eval(dataset, top_k=top_k, log_fn=log_fn)
+
+
 def main():
-    import argparse
     parser = argparse.ArgumentParser(description="hawk-memory-api recall benchmark")
     parser.add_argument("--dataset", default="datasets/hawk_memory/conversational_qa.jsonl",
                        help="JSONL dataset path")
@@ -245,34 +289,18 @@ def main():
                        help="Output report JSON path")
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--limit", type=int, default=0,
-                       help="只跑前N条（0=全部，用于快速迭代验证）")
+                       help="只跑前N条（0=全部）")
     parser.add_argument("--offset", type=int, default=0,
-                       help="从第几条开始跳过（0=从头，用于分批跑）")
+                       help="从第几条开始跳过（0=从头）")
     parser.add_argument("--host", default="http://127.0.0.1:18360")
-    parser.add_argument("--log", default=None,
-                       help="日志文件路径（追加），不指定则只输出到 stdout")
+    parser.add_argument("--mode", default="both",
+                       choices=["capture", "recall", "both"],
+                       help="capture=只 capture 数据集；recall=只评测 recall；both=两者都做（默认）")
+    parser.add_argument("--session-file",
+                       help="capture/recall 共享的 session 文件路径（Phase 间传递数据）")
     args = parser.parse_args()
 
-    # 设置日志输出（同时写文件 + stdout）
-    import logging, sys
-    log_handler = None
-    if args.log:
-        log_handler = logging.FileHandler(args.log, mode="a")
-        log_handler.setFormatter(logging.Formatter("%(message)s"))
-        root = logging.getLogger()
-        root.addHandler(log_handler)
-        root.setLevel(logging.INFO)
-        # 把 print 重定向到日志
-        def log_print(*a, **kw):
-            sep = kw.pop("sep", " ")
-            msg = sep.join(str(x) for x in a)
-            logging.info(msg)
-            print(*a, **kw)
-    else:
-        log_print = print
-
-    import json
-    from pathlib import Path
+    log_print = print
 
     # Load dataset
     dataset = []
@@ -290,25 +318,48 @@ def main():
     if args.limit > 0:
         dataset = dataset[:args.limit]
 
-    log_print(f"[benchmark] 数据集: {args.dataset} ({len(dataset)} 条)")
+    log_print(f"[benchmark] 数据集: {args.dataset} ({len(dataset)} 条)  mode={args.mode}")
 
-    # Run
     bm = HawkMemoryBenchmark()
-    bm.host = args.host
 
     if not bm.health_check():
         log_print("❌ hawk-memory-api health check failed")
-        if log_handler:
-            log_handler.close()
         return
 
     log_print("✅ hawk-memory-api health OK")
-    results, metrics = bm.run(dataset, top_k=args.top_k, log_fn=log_print)
+
+    results = []
+    metrics = {}
+
+    if args.mode in ("capture", "both"):
+        session_data = bm.capture_dataset(dataset, log_fn=log_print)
+        if args.session_file:
+            Path(args.session_file).parent.mkdir(parents=True, exist_ok=True)
+            with open(args.session_file, "w") as f:
+                json.dump(session_data, f, ensure_ascii=False, indent=2)
+            log_print(f"✅ session 已保存: {args.session_file}")
+
+    if args.mode in ("recall", "both"):
+        if args.mode == "recall" and args.session_file:
+            # 从 session 文件加载数据集（而不是用原始 dataset）
+            with open(args.session_file) as f:
+                session_data = json.load(f)
+            dataset = session_data["items"]
+            log_print(f"[recall] 从 session 加载 {len(dataset)} 条（忽略 --offset/--limit）")
+        results, metrics = bm.recall_eval(dataset, top_k=args.top_k, log_fn=log_print)
+
+    if args.mode == "both":
+        results, metrics = bm.run(dataset, top_k=args.top_k, log_fn=log_print)
+
+    if not results and metrics:
+        log_print("\n（capture-only 模式，无评测结果）")
+        return
 
     # Save report
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     report = {
         "dataset": args.dataset,
+        "mode": args.mode,
         "count": len(results),
         "metrics": metrics,
         "cases": [r.to_dict() for r in results],
@@ -333,9 +384,6 @@ def main():
     log_print(f"{'='*50}")
     log_print(f"\n报告已保存: {args.output}")
 
-    if log_handler:
-        log_handler.close()
-        logging.getLogger().removeHandler(log_handler)
 
 if __name__ == "__main__":
     main()
