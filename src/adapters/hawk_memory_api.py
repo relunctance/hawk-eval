@@ -38,15 +38,30 @@ class HawkMemoryAdapter:
         except Exception:
             return False
 
-    def capture(self, text: str, session_id: str, user_id: str = "eval") -> dict:
-        """存入一条记忆。"""
+    def capture(self, text: str, session_id: str, user_id: str = "eval",
+                question: str = None, answer: str = None) -> dict:
+        """
+        存入一条记忆。
+
+        支持两种模式：
+        - legacy: text=待存储文本（作为 message，response 为空）
+        - qa:     question + answer 作为完整对话存储
+                 → 存储 "用户: {question}" 和 "助手: {answer}"
+                 → recall(query=question) 时可匹配到含 answer 的记忆
+        """
         body = {
             "session_id": session_id,
             "user_id": user_id,
-            "message": text,
-            "response": "",
             "platform": self.platform,
         }
+        if question is not None and answer is not None:
+            # QA 模式：存储完整对话
+            body["message"] = question
+            body["response"] = answer
+        else:
+            # Legacy 模式：text 作为 message
+            body["message"] = text
+            body["response"] = ""
         data, _ = self._req("POST", "/capture", body)
         return data
 

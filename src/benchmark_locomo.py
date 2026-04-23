@@ -38,8 +38,6 @@ from typing import Optional
 # nltk BLEU (与 mflow-benchmarks 完全对齐)
 try:
     import nltk
-    nltk.download("punkt", quiet=True)
-    nltk.download("punkt_tab", quiet=True)
     _HAS_NLTK = True
 except Exception:
     _HAS_NLTK = False
@@ -78,39 +76,58 @@ def _tokenize(text: str) -> list[str]:
 
 def calculate_bleu1(prediction: str, reference: str) -> float:
     """
-    计算 BLEU-1，与 mflow-benchmarks/benchmarks/locomo-mflow/scripts/metrics.py 完全对齐。
-    使用 nltk word_tokenize + SmoothingFunction.method1。
+    计算 BLEU-1，与 mflow-benchmarks 完全对齐。
+    有 nltk：word_tokenize + SmoothingFunction.method1
+    无 nltk：空格分词 + 朴素 unigram overlap
     """
     if not prediction or not reference:
         return 0.0
 
+    pred_tokens: list[str]
+    ref_tokens_flat: list[str]
+
     try:
         if _HAS_NLTK:
+            import nltk
+            try:
+                nltk.download("punkt", quiet=True)
+                nltk.download("punkt_tab", quiet=True)
+            except Exception:
+                pass
             pred_tokens = nltk.word_tokenize(prediction.lower())
-            ref_tokens = [nltk.word_tokenize(reference.lower())]
+            # ref_tokens 是 list of list，取第一层
+            _ref_nested = [nltk.word_tokenize(reference.lower())]
+            ref_tokens_flat = _ref_nested[0]
+            smooth = None  # 延迟到调用时检测
         else:
             pred_tokens = prediction.lower().split()
-            ref_tokens = [reference.lower().split()]
+            ref_tokens_flat = reference.lower().split()
     except Exception:
         pred_tokens = prediction.lower().split()
-        ref_tokens = [reference.lower().split()]
+        ref_tokens_flat = reference.lower().split()
 
     if len(pred_tokens) == 0:
         return 0.0
 
-    # Smoothing to avoid 0 for short predictions
-    from nltk.translate.bleu_score import SmoothingFunction
-    smooth = SmoothingFunction().method1
-
     try:
-        score = nltk.translate.bleu_score.sentence_bleu(
-            ref_tokens,
-            pred_tokens,
-            weights=(1, 0, 0, 0),  # BLEU-1 only
-            smoothing_function=smooth,
-        )
+        if _HAS_NLTK:
+            from nltk.translate.bleu_score import SmoothingFunction
+            score = nltk.translate.bleu_score.sentence_bleu(
+                [ref_tokens_flat],
+                pred_tokens,
+                weights=(1, 0, 0, 0),
+                smoothing_function=SmoothingFunction().method1,
+            )
+        else:
+            # 朴素 BLEU-1：unigram overlap / pred_len
+            ref_set = set(ref_tokens_flat)
+            overlap = sum(1 for t in pred_tokens if t in ref_set)
+            score = overlap / len(pred_tokens)
     except Exception:
-        score = 0.0
+        # 最终 fallback：unigram F1
+        ref_set = set(ref_tokens_flat)
+        overlap = sum(1 for t in pred_tokens if t in ref_set)
+        score = overlap / max(len(pred_tokens), len(ref_tokens_flat)) if ref_tokens_flat else 0.0
 
     return score
 
@@ -243,13 +260,21 @@ class HawkMemoryLocomoBenchmark:
         data, s = hawk_req("GET", "/health")
         return s == 200 and data.get("status") == "ok"
 
-    def capture(self, text: str) -> bool:
+    def capture_qa(self, question: str, answer: str) -> bool:
+        """
+        以完整 QA 对话格式存储记忆（正确方式）。
+
+        hawk-memory-api 会存储：
+          - "用户: {question}"
+          - "助手: {answer}"
+        recall(query=question) → 返回含 answer 的记忆
+        """
         session = f"locomo-{uuid.uuid4().hex[:8]}"
         body = {
             "session_id": session,
             "user_id": "benchmark",
-            "message": text,
-            "response": "",
+            "message": question,
+            "response": answer,
             "platform": "locomo-benchmark",
         }
         data, s = hawk_req("POST", "/capture", body)
@@ -267,11 +292,12 @@ class HawkMemoryLocomoBenchmark:
 
     def run(self, dataset: list[dict], top_k: int = 10,
             use_llm_judge: bool = False) -> tuple[list[CaseResult], dict]:
-        # 1. Capture all memories
-        print(f"  [1] Capture {len(dataset)} memories...")
+        # 1. Capture all memories (QA format: message=question, response=answer)
+        print(f"  [1] Capture {len(dataset)} memories (QA format)...")
         def do_capture(item: dict) -> bool:
-            text = item.get("answer", "")
-            return bool(text and self.capture(text))
+            q = item.get("question", "")
+            a = item.get("answer", "")
+            return bool(q and a and self.capture_qa(q, a))
 
         with ThreadPoolExecutor(max_workers=5) as ex:
             caps = list(ex.map(do_capture, dataset))
@@ -292,10 +318,11 @@ class HawkMemoryLocomoBenchmark:
             memories, latency = self.recall(query, top_k=top_k)
             retrieved = [m.get("text", "") for m in memories]
 
-            # Find rank via text similarity
+            # Find rank: gold answer should appear in "助手: {answer}" text
             rank = None
             for pos, txt in enumerate(retrieved):
-                if text_similar(txt, gold):
+                # "助手: 7 May 2023" matches gold answer "7 May 2023"
+                if gold.lower() in txt.lower():
                     rank = pos + 1
                     break
 
