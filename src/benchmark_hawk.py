@@ -235,10 +235,10 @@ def main():
                 except:
                     pass
 
-    if args.limit > 0:
-        dataset = dataset[:args.limit]
     if args.offset > 0:
         dataset = dataset[args.offset:]
+    if args.limit > 0:
+        dataset = dataset[:args.limit]
 
     print(f"[benchmark] 数据集: {args.dataset} ({len(dataset)} 条)")
 
