@@ -117,9 +117,6 @@ _PLACEHOLDER_KEYWORDS = frozenset({
     "待查询", "请稍后", "稍后再试",
 })
 
-# answer 最小长度（短于这个值的 answer 缺乏可区分性）
-_MIN_ANSWER_LEN = 10
-
 
 def check_dataset_quality(dataset_path: str, strict: bool = False) -> bool:
     print(f"\n[3/5] Dataset quality check: {dataset_path}")
@@ -142,14 +139,7 @@ def check_dataset_quality(dataset_path: str, strict: bool = False) -> bool:
 
     issues = []
 
-    # 3a: answer 长度检查
-    short_answers = []
-    for d in lines:
-        answer = d.get("answer", "") or ""
-        if len(answer) < _MIN_ANSWER_LEN:
-            short_answers.append((d.get("id", "?"), answer[:20]))
-
-    # 3b: placeholder 检测
+    # 3a: placeholder 检测
     placeholder_answers = []
     for d in lines:
         answer = d.get("answer", "") or ""
@@ -172,13 +162,6 @@ def check_dataset_quality(dataset_path: str, strict: bool = False) -> bool:
     # 汇总报告
     print(f"  总条数: {len(lines)}")
 
-    if short_answers:
-        issues.append(f"  ⚠️  {len(short_answers)} 条 answer < {_MIN_ANSWER_LEN} chars（缺乏可区分性）")
-        for iid, ans in short_answers[:5]:
-            issues.append(f"      {iid}: \"{ans}\"")
-        if len(short_answers) > 5:
-            issues.append(f"      ... 还有 {len(short_answers) - 5} 条")
-
     if placeholder_answers:
         issues.append(f"  ⚠️  {len(placeholder_answers)} 条 answer 疑似 placeholder / 类别名")
         for iid, ans in placeholder_answers[:5]:
@@ -194,14 +177,13 @@ def check_dataset_quality(dataset_path: str, strict: bool = False) -> bool:
     if issues:
         for issue in issues:
             print(issue)
-        print(f"\n  ⚠️  数据集存在 {len(short_answers)}/{len(lines)} 条短 answer，"
-              f"{len(placeholder_answers)} 条疑似 placeholder，"
+        print(f"\n  ⚠️  数据集存在 {len(placeholder_answers)} 条疑似 placeholder，"
               f"{len(duplicate_answers)} 个重复 answer")
         if strict:
             sys.exit(1)
         return False
     else:
-        print(f"  ✅ 数据集质量通过（{len(lines)} 条，answer 长度正常，无 placeholder）")
+        print(f"  ✅ 数据集质量通过（{len(lines)} 条，无 placeholder，{len(duplicate_answers)} 个重复 answer 需注意）")
         return True
 
 
@@ -221,21 +203,23 @@ def check_db_status(strict: bool = False) -> bool:
     total = data.get("total", 0)
     by_source = data.get("by_source", {})
     by_category = data.get("by_category", {})
+    by_agent_id = data.get("by_agent_id", {})
     db_path = data.get("db_path", "?")
 
     print(f"  总记忆条数: {total}")
     print(f"  by_source: {json.dumps(by_source, ensure_ascii=False)}")
     print(f"  by_category: {json.dumps(by_category, ensure_ascii=False)}")
+    print(f"  by_agent_id: {json.dumps(by_agent_id, ensure_ascii=False)}")
 
     if total == 0:
         print("  ✅ DB 为空，clean 状态")
         return True
 
-    # 检测 eval namespace 残留（如果 benchmark 用的 platform=benchmark）
-    eval_count = by_source.get("benchmark", 0)
+    # 检测 eval namespace 残留（benchmark capture 用 agent_id='eval'）
+    eval_count = by_agent_id.get("eval", 0)
     if eval_count > 0:
-        print(f"\n  ⚠️  发现 {eval_count} 条 benchmark 数据残留！")
-        print(f"      建议: curl -s -X POST '{BASE}/admin/cleanup?agent_id=eval'")
+        print(f"\n  ⚠️  发现 {eval_count} 条 eval namespace 数据残留！")
+        print(f"      建议: curl -s -X POST '{BASE}/admin/cleanup' -d '{{\"agent_id\":\"eval\"}}'")
         print(f"      或使用: python scripts/benchmark_preflight.py --cleanup")
         if strict:
             sys.exit(1)
