@@ -144,6 +144,7 @@ class CaseResult:
     latency: float
     bleu1: float = 0.0
     f1: float = 0.0
+    match_method: str = "none"  # "memory_id" | "text" | "none"
 
     def to_dict(self):
         return asdict(self)
@@ -262,7 +263,8 @@ class HawkMemoryBenchmark:
             max_workers: concurrent HTTP requests (default 4)
 
         Returns:
-            (success_count, total_count)
+            (success_count, total_count, memory_ids)
+            memory_ids: list of all memory_ids returned by server (aligned with input order)
         """
         # Build DirectCaptureItem list (ground truth, no extraction)
         memories = []
@@ -282,39 +284,115 @@ class HawkMemoryBenchmark:
             })
 
         if not memories:
-            return 0, len(items)
+            return 0, len(items), []
 
         total = len(memories)
 
-        def send_batch(batch: list[dict]) -> int:
+        def send_batch(batch: list[dict]) -> tuple[int, list[str]]:
             body = {
                 "memories": batch,
                 "session_id": f"bm-{uuid.uuid4().hex[:8]}",
                 "platform": self.platform,
+                "agent_id": "eval",
             }
             data, s = req("POST", "/direct_capture", body)
             if s in (200, 201):
-                return data.get("stored", 0)
-            return 0
+                ids = data.get("memory_ids", [])
+                return data.get("stored", 0), ids
+            return 0, []
 
         # Split into batches and process concurrently
         batches = [memories[i:i + batch_size] for i in range(0, len(memories), batch_size)]
 
         stored = 0
+        all_ids: list[str] = []
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
             futures = {ex.submit(send_batch, batch): len(batch) for batch in batches}
             for future in as_completed(futures):
                 try:
-                    stored += future.result()
+                    cnt, ids = future.result()
+                    stored += cnt
+                    all_ids.extend(ids)
                 except Exception:
                     pass
 
-        return stored, total
+        return stored, total, all_ids
+
+    def direct_capture_batch_with_ids(self, items: list[dict], batch_size: int = 50, max_workers: int = 4) -> tuple[int, int, list[str]]:
+        """
+        批量 direct capture，返回每条记忆的 memory_id（按原 items 顺序对齐）。
+
+        与 direct_capture_batch 的区别：返回的 memory_ids 列表与输入 items 一一对应，
+        方便 hawk-eval 用 memory_id 做 ground-truth 评测。
+
+        Returns:
+            (success_count, total_count, memory_ids)
+            memory_ids: list of memory_ids，顺序与原 items 对齐（answer 为空的项对应空字符串）
+        """
+        # Build memories in parallel with tracking original indices
+        memories_by_idx: list[tuple[int, dict]] = []  # (original_idx, memory_dict)
+        for i, item in enumerate(items):
+            answer = item.get("answer") or item.get("memory_text") or ""
+            if not answer:
+                continue
+            memories_by_idx.append((i, {
+                "text": answer,
+                "category": "other",
+                "importance": 1.0,
+                "name": "",
+                "description": "",
+                "metadata": {
+                    "question": item.get("question", ""),
+                },
+            }))
+
+        if not memories_by_idx:
+            return 0, len(items), [""] * len(items)
+
+        total = len(items)
+
+        def send_batch(batch: list[tuple[int, dict]]) -> tuple[int, list[tuple[int, str]]]:
+            """Returns (stored_count, list of (original_idx, memory_id))"""
+            memories = [m for _, m in batch]
+            body = {
+                "memories": memories,
+                "session_id": f"bm-{uuid.uuid4().hex[:8]}",
+                "platform": self.platform,
+                "agent_id": "eval",
+            }
+            data, s = req("POST", "/direct_capture", body)
+            if s in (200, 201):
+                ids = data.get("memory_ids", [])
+                # Pair original indices with returned IDs (aligned with batch order)
+                return data.get("stored", 0), list(zip([idx for idx, _ in batch], ids))
+            return 0, []
+
+        # Split into batches
+        batches = [memories_by_idx[i:i + batch_size] for i in range(0, len(memories_by_idx), batch_size)]
+
+        stored = 0
+        # index_to_memory_id: original_idx -> memory_id
+        index_to_memory_id: dict[int, str] = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = {ex.submit(send_batch, batch): len(batch) for batch in batches}
+            for future in as_completed(futures):
+                try:
+                    cnt, idx_id_pairs = future.result()
+                    stored += cnt
+                    for orig_idx, mem_id in idx_id_pairs:
+                        index_to_memory_id[orig_idx] = mem_id
+                except Exception:
+                    pass
+
+        # Build aligned memory_ids list (empty string for skipped items)
+        memory_ids = [index_to_memory_id.get(i, "") for i in range(total)]
+        return stored, total, memory_ids
 
     def recall(self, query: str, top_k: int = 10,
                query_vector: list[float] | None = None) -> tuple[list[dict], float]:
         """recall，返回 (memories, latency)。可通过 query_vector 跳过 embedding 计算。"""
-        body = {"query": query, "top_k": top_k, "mode": "global"}
+        body = {"query": query, "top_k": top_k, "mode": "platform_only",
+                "platform": self.platform, "agent_id": "eval"}
         if query_vector is not None:
             body["query_vector"] = query_vector
         t0 = time.perf_counter()
@@ -331,7 +409,13 @@ class HawkMemoryBenchmark:
         Returns: {
             "platform": str,
             "count": int,
-            "items": [{"id": str, "question": str, "answer": str, "query_vector": list[float]}, ...]
+            "items": [{
+                "id": str,           # dataset original id
+                "memory_id": str,    # hawk-memory-api memory_id (for exact rank matching)
+                "question": str,
+                "answer": str,
+                "query_vector": list[float],
+            }, ...]
         }
         """
         if log_fn is None:
@@ -344,8 +428,9 @@ class HawkMemoryBenchmark:
         t0 = time.time()
         if use_llm:
             ok, total = self.capture_batch(dataset, batch_size=50, max_workers=4)
+            memory_ids = []  # LLM capture doesn't return per-item IDs yet
         else:
-            ok, total = self.direct_capture_batch(dataset, batch_size=50, max_workers=4)
+            ok, total, memory_ids = self.direct_capture_batch_with_ids(dataset, batch_size=50, max_workers=4)
         elapsed = time.time() - t0
         log_fn(f"      已 capture {ok}/{total} 条 ({elapsed:.1f}s)")
 
@@ -367,6 +452,7 @@ class HawkMemoryBenchmark:
             "items": [
                 {
                     "id": item.get("id", f"q-{i}"),
+                    "memory_id": memory_ids[i] if i < len(memory_ids) else "",
                     "question": item.get("question", ""),
                     "answer": item.get("answer") or item.get("memory_text", ""),
                     "query_vector": vectors[i] if i < len(vectors) else None,
@@ -387,14 +473,30 @@ class HawkMemoryBenchmark:
             qid = item.get("id", f"q-{i}")
             query = item.get("question", "")
             query_vector = item.get("query_vector")
+            target_memory_id = item.get("memory_id", "")
             target_text = item.get("answer") or item.get("memory_text", "")
             memories, latency = self.recall(query, top_k=top_k, query_vector=query_vector)
-            retrieved_texts = [m.get("text", "") for m in memories]
+
+            # Primary: exact memory_id match (precise, no ambiguity)
             rank = None
-            for pos, txt in enumerate(retrieved_texts):
-                if text_similar(txt, target_text):
-                    rank = pos + 1
-                    break
+            match_method = "none"
+            if target_memory_id:
+                for pos, m in enumerate(memories):
+                    if m.get("id") == target_memory_id:
+                        rank = pos + 1
+                        match_method = "memory_id"
+                        break
+
+            # Fallback: text similarity (for sessions created before memory_id was added)
+            if rank is None and target_text:
+                retrieved_texts = [m.get("text", "") for m in memories]
+                for pos, txt in enumerate(retrieved_texts):
+                    if text_similar(txt, target_text):
+                        rank = pos + 1
+                        match_method = "text"
+                        break
+
+            retrieved_texts = [m.get("text", "") for m in memories]
             bleu1 = 0.0
             f1 = 0.0
             if retrieved_texts and target_text:
@@ -403,7 +505,8 @@ class HawkMemoryBenchmark:
                 f1 = tm.get("f1", 0.0)
             return CaseResult(query_id=qid, query=query, target_text=target_text,
                               retrieved_texts=retrieved_texts, rank=rank,
-                              latency=latency, bleu1=bleu1, f1=f1)
+                              latency=latency, bleu1=bleu1, f1=f1,
+                              match_method=match_method)
 
         results: list[CaseResult] = []
         with ThreadPoolExecutor(max_workers=3) as executor:
@@ -453,8 +556,9 @@ class HawkMemoryBenchmark:
         t0 = time.time()
         if use_llm:
             captured, total = self.capture_batch(dataset, batch_size=50, max_workers=4)
+            memory_ids = []
         else:
-            captured, total = self.direct_capture_batch(dataset, batch_size=50, max_workers=4)
+            captured, total, memory_ids = self.direct_capture_batch_with_ids(dataset, batch_size=50, max_workers=4)
         elapsed = time.time() - t0
         log_fn(f"      已 capture {captured}/{total} 条 ({elapsed:.1f}s)")
 
@@ -464,6 +568,9 @@ class HawkMemoryBenchmark:
             for i, item in enumerate(dataset):
                 cache_item = cache["items"][i] if i < len(cache.get("items", [])) else {}
                 item["query_vector"] = cache_item.get("query_vector")
+                # Inject memory_id from cache (for sessions saved before this change)
+                if "memory_id" not in item:
+                    item["memory_id"] = cache_item.get("memory_id", "")
         else:
             log_fn(f"  [embedding] 预计算 {len(dataset)} 条 question 向量...")
             questions = [item.get("question", "") for item in dataset]
@@ -471,6 +578,9 @@ class HawkMemoryBenchmark:
             log_fn(f"      向量计算完成 ({len(vectors)}/{len(questions)})")
             for i, item in enumerate(dataset):
                 item["query_vector"] = vectors[i] if i < len(vectors) else None
+                # Inject memory_id from capture (new sessions have this)
+                if memory_ids and i < len(memory_ids):
+                    item["memory_id"] = memory_ids[i]
 
         log_fn(f"  [2] 等待索引就绪 (3s)...")
         time.sleep(3)
