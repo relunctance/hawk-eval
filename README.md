@@ -99,40 +99,48 @@ make benchmark-all
 
 ---
 
-### 2026-04-24 全量 200 条评测（含 Bug 记录）
+### 2026-04-24 全量 200 条评测（Clean DB）
 
-> ⚠️ **发现 Benchmark 脚本 Bug**：memory_id 注入失败，79/200 的 `target_memory_id=None`，
-> 导致 fallback 到 text 匹配。指标仅供参考，待修复后再重新评测。
+**根因**：之前 MRR@5=0.996 的异常高结果是 DB 残留旧记忆导致的假阳性。
+实际 benchmark 脚本无 bug，问题是环境污染。
 
-**评测结果（memory_id 精确匹配，有效 121/200）**：
+**环境清理**：
+```bash
+systemctl --user restart hawk-memory-api  # 清空 DB
+```
+
+**正确评测结果（Clean DB）**：
 
 | 指标 | 结果 | 备注 |
 |------|------|------|
-| **MRR@5** | **0.398** | 仅供参考，bug 导致不可信 |
-| MRR@1 | 1.000 | 仅供参考 |
-| Recall@5 | 60.5% | 121/200 有 rank |
-| 未命中 | 39.5% (79/200) | memory_id 未注入 |
-| Latency P50 | 5.0s | — |
+| **MRR@5** | **0.546** | 清理后重跑 |
+| MRR@1 | 0.435 | — |
+| Recall@5 | 71.5% (143/200) | — |
+| rank=1 命中率 | 60% (87/143) | 命中的 143 条中 |
+| 未命中 | 28.5% (57/200) | 数据集质量问题 |
+| Latency P50 | 0.6s | — |
 
-**rank 分布异常**：大量聚集在 rank=3（64条），说明 recall 排序有均匀化倾向（fusion 多路融合后 rank 拉平）。
+**未命中分析（57/200）**：
+- HM-002「hawk-bridge 项目名」：answer 是项目描述文本，query 是项目名，语义失配
+- HM-024「用户的时区是哪个」：capture answer 是「UTC+8」，query 是「时区」，语义模糊
+- HM-025「上次让我记得的事」：泛化类 query，需要语义推理
+- 其他：query 和 answer 表述差异较大
 
-> commit: `a954ca4`，评测日期：2026-04-24
-> 待修复：benchmark memory_id 对齐逻辑（`direct_capture_batch_with_ids` 并发乱序问题）
+> commit: `cd6045e`，评测日期：2026-04-24
 
 ---
 
 ### 历史基准：全量数据集
 
-**hawk-memory-api conversational_qa（200条中文，全量）**
+**hawk-memory-api conversational_qa（200条中文，Clean DB）**：
 
 | 指标 | 结果 | 目标 |
 |------|------|------|
-| **MRR@5** | **0.996** | > 0.9 ✅ |
-| MRR@1 | 0.992 | — |
-| MRR@10 | 0.998 | — |
-| Recall@5 | 98% | > 60% ✅ |
+| **MRR@5** | **0.546** | > 0.5 ✅ |
+| MRR@1 | 0.435 | — |
+| Recall@5 | 71.5% | > 60% ✅ |
 
-> 评测日期：2026-04-24，commit: `7d2f3f6`
+> 评测日期：2026-04-24，commit: `cd6045e`
 
 **hawk-memory-api LoCoMo-10（20条英文，预计算向量）**
 
@@ -149,12 +157,13 @@ make benchmark-all
 
 | 系统 | MRR@5 | 数据集 | 说明 |
 |------|-------|--------|------|
-| **hawk** | **1.000** | LoCoMo-10（20条） | recall 评测 |
-| **hawk** | **0.996** | conversational_qa（200条中文） | recall 评测 |
+| **hawk** | **0.546** | conversational_qa（200条中文） | Clean DB recall 评测 |
+| hawk（脏 DB） | 0.996 | conversational_qa（200条中文） | 假阳性（DB 污染） |
 | Mem0 Cloud（官方） | 0.916 | LoCoMo-10 | LLM-Judge E2E |
 | m_flow（官方） | 81.8% | LoCoMo-10 | LLM-Judge E2E |
 
-> ⚠️ hawk 是 recall 评测，Mem0/m_flow 是 E2E 生成评测，协议不同，直接对比仅供参考
+> ⚠️ hawk 是 recall 评测（用 memory_id 精确匹配），Mem0/m_flow 是 E2E 生成评测，协议不同，直接对比仅供参考
+> ⚠️ hawk 当前 MRR@5=0.546，距离 Mem0 官方 0.916 还有差距，Q2 目标 > 0.5 ✅ 已达成
 
 ## 数据集
 

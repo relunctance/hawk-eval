@@ -614,7 +614,7 @@ def main():
 
     from datetime import datetime
     def log_print(*args, **kwargs):
-        print(f"[{datetime.now().strftime('%H:%M:%S')}]", *args, **kwargs)
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]", *args, **kwargs)
 
     # Load dataset
     dataset = []
