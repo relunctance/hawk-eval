@@ -283,7 +283,7 @@ class HawkMemoryBenchmark:
                               latency=latency, bleu1=bleu1, f1=f1)
 
         results: list[CaseResult] = []
-        with ThreadPoolExecutor(max_workers=1) as executor:
+        with ThreadPoolExecutor(max_workers=8) as executor:
             futures = {executor.submit(do_recall, item, i): i
                        for i, item in enumerate(dataset)}
             done = 0
@@ -382,7 +382,9 @@ def main():
                        help="capture/recall 共享的 session 文件路径（Phase 间传递数据）")
     args = parser.parse_args()
 
-    log_print = print
+    from datetime import datetime
+    def log_print(*args, **kwargs):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}]", *args, **kwargs)
 
     # Load dataset
     dataset = []
