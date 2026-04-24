@@ -191,6 +191,64 @@ class HawkMemoryBenchmark:
         data, s = req("POST", "/capture", body)
         return s in (200, 201)
 
+    def capture_batch(self, items: list[dict], batch_size: int = 50, max_workers: int = 4) -> tuple[int, int]:
+        """
+        批量 capture QA 对，使用 /capture/batch 端点（server-side batch embedding + parallel LLM extraction）。
+
+        相比逐条 /capture：
+        - 1 个 HTTP 请求携带多个 items
+        - Server 端并行 LLM extraction（asyncio.gather）
+        - Server 端批量 embedding（embed_texts 一次请求 xinference）
+        - 大幅减少 HTTP RTT 开销
+
+        Args:
+            items: list of dicts with 'question' and 'answer' (or 'memory_text') keys
+            batch_size: items per batch request (default 50)
+            max_workers: concurrent batch requests (default 4)
+
+        Returns:
+            (success_count, total_count)
+        """
+        # Build batch items (filter out empty question/answer)
+        batch_items = []
+        for item in items:
+            question = item.get("question", "")
+            answer = item.get("answer") or item.get("memory_text") or ""
+            if question and answer:
+                batch_items.append({
+                    "session_id": f"bm-{uuid.uuid4().hex[:8]}",
+                    "user_id": "benchmark",
+                    "message": question,
+                    "response": answer,
+                    "platform": self.platform,
+                })
+
+        if not batch_items:
+            return 0, len(items)
+
+        total = len(batch_items)
+        captured = 0
+
+        def send_batch(batch: list[dict]) -> int:
+            body = {"items": batch}
+            data, s = req("POST", "/capture/batch", body)
+            if s in (200, 201):
+                return data.get("stored", 0)
+            return 0
+
+        # Split into batches and process concurrently
+        batches = [batch_items[i:i + batch_size] for i in range(0, len(batch_items), batch_size)]
+
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = {ex.submit(send_batch, batch): len(batch) for batch in batches}
+            for future in as_completed(futures):
+                try:
+                    captured += future.result()
+                except Exception:
+                    pass
+
+        return captured, total
+
     def recall(self, query: str, top_k: int = 10,
                query_vector: list[float] | None = None) -> tuple[list[dict], float]:
         """recall，返回 (memories, latency)。可通过 query_vector 跳过 embedding 计算。"""
@@ -217,19 +275,13 @@ class HawkMemoryBenchmark:
         if log_fn is None:
             log_fn = print
 
-        log_fn(f"  [capture] {len(dataset)} 条记忆...")
+        log_fn(f"  [capture] {len(dataset)} 条记忆（batch模式）...")
 
-        # 1) capture
-        ok = 0
-        for i, item in enumerate(dataset):
-            question = item.get("question", "")
-            answer = item.get("answer") or item.get("memory_text") or ""
-            if question and answer:
-                self.capture_qa(question, answer)
-                ok += 1
-            if (i + 1) % 20 == 0:
-                log_fn(f"      进度: {i+1}/{len(dataset)}")
-        log_fn(f"      已 capture {ok}/{len(dataset)} 条")
+        # 1) capture using batch endpoint (much faster than sequential capture_qa)
+        t0 = time.time()
+        ok, total = self.capture_batch(dataset, batch_size=50, max_workers=4)
+        elapsed = time.time() - t0
+        log_fn(f"      已 capture {ok}/{total} 条 ({elapsed:.1f}s)")
 
         # 2) 预计算所有 question embedding（不占用 recall 路径）
         log_fn(f"  [embedding] 预计算 {len(dataset)} 条 question 向量...")
@@ -328,25 +380,11 @@ class HawkMemoryBenchmark:
         if log_fn is None:
             log_fn = print
 
-        log_fn(f"  [1] Capture {len(dataset)} 条记忆（并行）...")
-
-        def do_capture(item: dict) -> tuple[int, bool]:
-            idx = id(item)
-            question = item.get("question", "")
-            answer = item.get("answer") or item.get("memory_text") or ""
-            ok = bool(question and answer and self.capture_qa(question, answer))
-            return id(item), ok
-
-        with ThreadPoolExecutor(max_workers=3) as ex:
-            futures = {ex.submit(do_capture, item): i
-                       for i, item in enumerate(dataset)}
-            done = 0
-            for future in as_completed(futures):
-                done += 1
-                if done % 20 == 0 or done == len(dataset):
-                    log_fn(f"      capture 进度: {done}/{len(dataset)}")
-        captured = sum(ok for _, ok in [f.result() for f in futures])
-        log_fn(f"      已 capture {captured}/{len(dataset)} 条")
+        log_fn(f"  [1] Capture {len(dataset)} 条记忆（batch模式）...")
+        t0 = time.time()
+        captured, total = self.capture_batch(dataset, batch_size=50, max_workers=4)
+        elapsed = time.time() - t0
+        log_fn(f"      已 capture {captured}/{total} 条 ({elapsed:.1f}s)")
 
         # 注入 query_vector（来自缓存，或实时计算）
         if cache is not None:
