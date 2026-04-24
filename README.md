@@ -99,6 +99,28 @@ make benchmark-all
 
 ---
 
+### 2026-04-24 全量 200 条评测（含 Bug 记录）
+
+> ⚠️ **发现 Benchmark 脚本 Bug**：memory_id 注入失败，79/200 的 `target_memory_id=None`，
+> 导致 fallback 到 text 匹配。指标仅供参考，待修复后再重新评测。
+
+**评测结果（memory_id 精确匹配，有效 121/200）**：
+
+| 指标 | 结果 | 备注 |
+|------|------|------|
+| **MRR@5** | **0.398** | 仅供参考，bug 导致不可信 |
+| MRR@1 | 1.000 | 仅供参考 |
+| Recall@5 | 60.5% | 121/200 有 rank |
+| 未命中 | 39.5% (79/200) | memory_id 未注入 |
+| Latency P50 | 5.0s | — |
+
+**rank 分布异常**：大量聚集在 rank=3（64条），说明 recall 排序有均匀化倾向（fusion 多路融合后 rank 拉平）。
+
+> commit: `a954ca4`，评测日期：2026-04-24
+> 待修复：benchmark memory_id 对齐逻辑（`direct_capture_batch_with_ids` 并发乱序问题）
+
+---
+
 ### 历史基准：全量数据集
 
 **hawk-memory-api conversational_qa（200条中文，全量）**
