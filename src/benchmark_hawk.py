@@ -146,7 +146,7 @@ class HawkMemoryBenchmark:
 
     def recall(self, query: str, top_k: int = 10) -> tuple[list[dict], float]:
         """recall，返回 (memories, latency)。"""
-        body = {"query": query, "top_k": top_k, "platform": self.platform}
+        body = {"query": query, "top_k": top_k, "mode": "global"}
         t0 = time.perf_counter()
         data, s = req("POST", "/recall", body)
         latency = time.perf_counter() - t0
@@ -237,15 +237,12 @@ class HawkMemoryBenchmark:
                      if "-" in r.query_id else 0)
 
         # 计算汇总指标
-        def _strip(t: str) -> str:
-            for p in ("用户: ", "助手: "):
-                if t.startswith(p):
-                    return t[len(p):]
-            return t
-
+        # NOTE: must use _strip_prefix (module-level, handles \n-split + role prefix)
+        # not the local _strip above (only handles role prefix → would cause
+        # compute_recall_metrics exact-match to fail)
         metrics = compute_recall_metrics([
-            {"query_id": r.query_id, "target_id": r.target_text,
-             "retrieved_ids": [_strip(t) for t in r.retrieved_texts]}
+            {"query_id": r.query_id, "target_id": _strip_prefix(r.target_text),
+             "retrieved_ids": [_strip_prefix(t) for t in r.retrieved_texts]}
             for r in results
         ], k_values=[1, 3, 5, 10])
 
