@@ -63,10 +63,16 @@ def req(method, path, body=None, timeout=30):
 def embed_texts(texts: list[str]) -> list[list[float]]:
     """批量计算文本 embedding（直接调 xinference，不走 hawk-memory-api）。"""
     body = {"model": EMBED_MODEL, "input": texts}
-    data, s = req("POST", EMBED_URL, body, timeout=30)
-    if s != 200:
+    data = json.dumps(body).encode()
+    headers = {"Content-Type": "application/json"}
+    req_ = urllib.request.Request(EMBED_URL, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req_, timeout=30) as r:
+            result = json.loads(r.read())
+    except Exception as e:
+        print(f"  [embedding] ERROR: {e}")
         return []
-    return [item["embedding"] for item in data.get("data", [])]
+    return [item["embedding"] for item in result.get("data", [])]
 
 
 # ─── Text Similarity ─────────────────────────────────────────────────────────
