@@ -23,13 +23,12 @@
 {"id": "HM-023", "question": "怎么在 Python 里发起 HTTP 请求？", "answer": "可以用 requests 库，或者标准库的 urllib。", "category": "3"}
 {"id": "HM-024", "question": "用户的时区是哪个？", "answer": "用户在北京时区（UTC+8）。", "category": "3"}
 {"id": "HM-025", "question": "上次让我记得的事是什么？", "answer": "上次让你记得我偏好 Python 编程，主要用 hermes-agent 做开发。", "category": "1"}
-
 {"id": "HM-026", "question": "我平时喜欢用中文交流，你记住这个偏好", "answer": "了解用户语言偏好", "category": "1"}
 {"id": "HM-027", "question": "上次你说我的代码风格偏函数式，是什么意思", "answer": "解释函数式编程特点", "category": "1"}
 {"id": "HM-028", "question": "我不喜欢每次都要解释上下文，能记住吗", "answer": "询问记忆持久化能力", "category": "1"}
 {"id": "HM-029", "question": "我的Windows路径总是出问题，怎么处理WSL路径", "answer": "Windows/WSL路径转换", "category": "1"}
 {"id": "HM-030", "question": "上次帮你优化后性能提升了多少", "answer": "性能改进追踪", "category": "1"}
-{"id": "HM-031", "question": "你记得我最喜欢的编程语言是哪个吗", "answer": "用户偏好回忆", "category": "1"}
+{"id": "HM-031", "question": "你记得我最喜欢的编程语言是哪个吗", "answer": "上次让你记得我偏好 Python 编程，主要用 hermes-agent 做开发。", "category": "1"}
 {"id": "HM-032", "question": "我之前设置的 importance_threshold 是多少", "answer": "配置参数回忆", "category": "1"}
 {"id": "HM-033", "question": "我之前改的那个 threshold 是 0.3 吗", "answer": "参数值回忆", "category": "1"}
 {"id": "HM-034", "question": "我之前说的那个改进建议你考虑了吗", "answer": "建议采纳状态", "category": "1"}
@@ -37,27 +36,27 @@
 {"id": "HM-036", "question": "hawk-memory-api 的 recall 接口怎么调用", "answer": "hawk-memory-api recall API", "category": "2"}
 {"id": "HM-037", "question": "hawk-bridge 和 hawk-memory-api 是什么关系", "answer": "hawk-bridge与hawk-memory-api关系", "category": "2"}
 {"id": "HM-038", "question": "LanceDB 作为向量数据库有什么优缺点", "answer": "LanceDB向量数据库特性", "category": "2"}
-{"id": "HM-039", "question": "为什么 hawk-memory-api 选择 LanceDB 而不是 Chroma", "answer": "选型对比分析", "category": "2"}
+{"id": "HM-039", "question": "为什么 hawk-memory-api 选择 LanceDB 而不是 Chroma", "answer": "hawk-memory-api recall API", "category": "2"}
 {"id": "HM-040", "question": "GraphPort 接口设计是怎么来的", "answer": "GraphPort架构设计", "category": "2"}
 {"id": "HM-041", "question": "agent namespace 具体是怎么实现的", "answer": "agent_id字段设计", "category": "2"}
 {"id": "HM-042", "question": "capture 返回 memory_id 有什么用", "answer": "memory_id用途说明", "category": "2"}
 {"id": "HM-043", "question": "neo4j 图数据库适合什么场景", "answer": "Neo4j适用场景", "category": "2"}
-{"id": "HM-044", "question": "什么叫记忆的 Raw→Pattern→Principle→Skill 进化", "answer": "记忆进化模型", "category": "2"}
+{"id": "HM-044", "question": "什么叫记忆的 Raw→Pattern→Principle→Skill 进化", "answer": "soul-engine 是记忆进化引擎，负责从 Raw Memory 提炼 Pattern → Principle → Skill。", "category": "2"}
 {"id": "HM-045", "question": "MRR@5 是什么指标，衡量什么", "answer": "MRR评估指标解释", "category": "2"}
 {"id": "HM-046", "question": "hawk-eval 的 benchmark 怎么跑", "answer": "hawk-eval使用方法", "category": "2"}
 {"id": "HM-047", "question": "为什么要用 agent_id 区分不同 Agent 的记忆", "answer": "多Agent隔离设计", "category": "2"}
 {"id": "HM-048", "question": "hawk-memory-api 支持哪些 embedding 模型", "answer": "支持的embedding模型", "category": "2"}
 {"id": "HM-049", "question": "FTS 全文索引在 LanceDB 里怎么建", "answer": "LanceDB FTS配置", "category": "2"}
 {"id": "HM-050", "question": "memory ports 和 storage engine 是什么关系", "answer": "架构层次关系", "category": "2"}
-{"id": "HM-051", "question": "上次提到的 Hawk 记忆 API 端点是什么", "answer": "API端点回忆", "category": "2"}
-{"id": "HM-052", "question": "hawk-memory-api 的 /health 接口返回什么", "answer": "健康检查端点", "category": "2"}
-{"id": "HM-053", "question": "hawk-memory-api 怎么查看当前存了多少条记忆", "answer": "存储统计查询", "category": "2"}
+{"id": "HM-051", "question": "上次提到的 Hawk 记忆 API 端点是什么", "answer": "hawk-memory-api 默认使用 18360 端口。", "category": "2"}
+{"id": "HM-052", "question": "hawk-memory-api 的 /health 接口返回什么", "answer": "hawk-memory-api recall API", "category": "2"}
+{"id": "HM-053", "question": "hawk-memory-api 怎么查看当前存了多少条记忆", "answer": "hawk-memory-api recall API", "category": "2"}
 {"id": "HM-054", "question": "hawk-bridge 的 Event Bus 支持哪些事件类型", "answer": "事件类型定义", "category": "2"}
 {"id": "HM-055", "question": "hawk-eval 里的 BLEU 指标是怎么算的", "answer": "评测指标计算", "category": "2"}
-{"id": "HM-056", "question": "上次提的 Mem0 MRR 是 91.6 是在哪个数据集上", "answer": "竞品指标来源", "category": "2"}
+{"id": "HM-056", "question": "上次提的 Mem0 MRR 是 91.6 是在哪个数据集上", "answer": "Mem0 在 LoCoMo 上最新分数是 MRR 91.6，Bleu 71.4。", "category": "2"}
 {"id": "HM-057", "question": "帮我回忆下上次我们讨论的架构设计方案", "answer": "架构讨论历史", "category": "3"}
-{"id": "HM-058", "question": "上次部署 hawk-memory-api 遇到什么问题来着", "answer": "部署问题回顾", "category": "3"}
-{"id": "HM-059", "question": "我们上次说要做 m_flow benchmark，现在进度怎么样了", "answer": "项目进度回顾", "category": "3"}
+{"id": "HM-058", "question": "上次部署 hawk-memory-api 遇到什么问题来着", "answer": "hawk-memory-api recall API", "category": "3"}
+{"id": "HM-059", "question": "我们上次说要做 m_flow benchmark，现在进度怎么样了", "answer": "下一步要搭建 hawk-eval 的测试体系，跑通 baseline 并对标 m_flow。", "category": "3"}
 {"id": "HM-060", "question": "上次评审代码你提了哪几点修改意见", "answer": "代码评审意见回顾", "category": "3"}
 {"id": "HM-061", "question": "我们讨论过哪些评测指标", "answer": "评测指标讨论历史", "category": "3"}
 {"id": "HM-062", "question": "上次定的 Q2 OKR 有哪些", "answer": "OKR内容回顾", "category": "3"}
@@ -66,7 +65,7 @@
 {"id": "HM-065", "question": "之前讨论过哪些图数据库", "answer": "图数据库选型回顾", "category": "3"}
 {"id": "HM-066", "question": "上次我提的 Decay 策略你改了吗", "answer": "Decay策略修改回顾", "category": "3"}
 {"id": "HM-067", "question": "什么时候讨论过 LoCoMo 数据集", "answer": "数据集讨论时间", "category": "3"}
-{"id": "HM-068", "question": "上次 m_flow benchmark 跑了什么结果", "answer": "benchmark结果回顾", "category": "3"}
+{"id": "HM-068", "question": "上次 m_flow benchmark 跑了什么结果", "answer": "下一步要搭建 hawk-eval 的测试体系，跑通 baseline 并对标 m_flow。", "category": "3"}
 {"id": "HM-069", "question": "之前提的 Event Bus 是用来干什么的", "answer": "Event Bus用途回顾", "category": "3"}
 {"id": "HM-070", "question": "上次说的 5 件套是指哪 5 个", "answer": "五件套内容回顾", "category": "3"}
 {"id": "HM-071", "question": "之前讨论的 SOUL.md 是什么", "answer": "SOUL.md概念回顾", "category": "3"}
@@ -89,14 +88,14 @@
 {"id": "HM-088", "question": "Fast Path 和 Slow Path 分别处理什么", "answer": "快慢路径设计", "category": "4"}
 {"id": "HM-089", "question": "什么叫 Hook 系统，hawk-bridge 里怎么用", "answer": "Hook机制解释", "category": "4"}
 {"id": "HM-090", "question": "Pipeline Stage 接口设计解决了什么问题", "answer": "Pipeline架构优点", "category": "4"}
-{"id": "HM-091", "question": "为什么 hawk-bridge 用 Go 而不是 Python", "answer": "Go语言选型理由", "category": "4"}
+{"id": "HM-091", "question": "为什么 hawk-bridge 用 Go 而不是 Python", "answer": "hawk-bridge与hawk-memory-api关系", "category": "4"}
 {"id": "HM-092", "question": "hawk-memory-api 的 schema 升级会自动迁移数据吗", "answer": "数据迁移策略", "category": "4"}
-{"id": "HM-093", "question": "hawk-memory-api 的多进程是怎么管理的", "answer": "并发架构设计", "category": "4"}
-{"id": "HM-094", "question": "hawk-memory-api 支持自定义 embedding 吗", "answer": "embedding扩展性", "category": "4"}
-{"id": "HM-095", "question": "hawk-memory-api 的 embedding 是同步还是异步的", "answer": "异步处理设计", "category": "4"}
-{"id": "HM-096", "question": "hawk-memory-api 有断路器机制吗", "answer": "容错设计", "category": "4"}
-{"id": "HM-097", "question": "hawk-memory-api 有没有缓存机制", "answer": "缓存架构设计", "category": "4"}
-{"id": "HM-098", "question": "为什么要区分 Raw Memory 和 Pattern Memory", "answer": "记忆分层原因", "category": "4"}
+{"id": "HM-093", "question": "hawk-memory-api 的多进程是怎么管理的", "answer": "hawk-bridge与hawk-memory-api关系", "category": "4"}
+{"id": "HM-094", "question": "hawk-memory-api 支持自定义 embedding 吗", "answer": "hawk-memory-api recall API", "category": "4"}
+{"id": "HM-095", "question": "hawk-memory-api 的 embedding 是同步还是异步的", "answer": "hawk-memory-api recall API", "category": "4"}
+{"id": "HM-096", "question": "hawk-memory-api 有断路器机制吗", "answer": "hawk-memory-api recall API", "category": "4"}
+{"id": "HM-097", "question": "hawk-memory-api 有没有缓存机制", "answer": "hawk-memory-api recall API", "category": "4"}
+{"id": "HM-098", "question": "为什么要区分 Raw Memory 和 Pattern Memory", "answer": "soul-engine 是记忆进化引擎，负责从 Raw Memory 提炼 Pattern → Principle → Skill。", "category": "4"}
 {"id": "HM-099", "question": "你记得我上次问过你关于 Python 装饰器的问题吗", "answer": "装饰器知识点回顾", "category": "4"}
 {"id": "HM-100", "question": "我之前让你帮我写过一个 Python 脚本，能再给我看看吗", "answer": "历史代码片段请求", "category": "5"}
 {"id": "HM-101", "question": "上次你给我的 Git 命令是什么来着", "answer": "历史命令回忆", "category": "5"}
@@ -114,44 +113,44 @@
 {"id": "HM-113", "question": "我上次让你优化的那段代码是哪几个文件", "answer": "代码位置回忆", "category": "5"}
 {"id": "HM-114", "question": "我之前说的那个 bug 是在哪个函数里", "answer": "缺陷位置回忆", "category": "5"}
 {"id": "HM-115", "question": "我之前保存的那个链接是什么", "answer": "链接回忆", "category": "5"}
-{"id": "HM-116", "question": "我上次问你的那个 Python 库叫什么来着", "answer": "库名回忆", "category": "5"}
+{"id": "HM-116", "question": "我上次问你的那个 Python 库叫什么来着", "answer": "上次让你记得我偏好 Python 编程，主要用 hermes-agent 做开发。", "category": "5"}
 {"id": "HM-117", "question": "我之前的那个测试用例编号是多少", "answer": "用例编号回忆", "category": "5"}
 {"id": "HM-118", "question": "我上个月说的那个计划后来执行了吗", "answer": "长期计划追踪", "category": "5"}
 {"id": "HM-119", "question": "我之前提的那个 API key 配置在哪里了", "answer": "密钥位置回忆", "category": "5"}
-{"id": "HM-120", "question": "hawk-okr 的 Q2 目标完成多少了", "answer": "OKR进度查询", "category": "6"}
+{"id": "HM-120", "question": "hawk-okr 的 Q2 目标完成多少了", "answer": "用户今天心情不错，上午完成了 hawk-eval 的搭建。", "category": "6"}
 {"id": "HM-121", "question": "哪些 KR 还没完成", "answer": "KR状态查询", "category": "6"}
 {"id": "HM-122", "question": "当前最高的优先级是什么", "answer": "优先级确认", "category": "6"}
-{"id": "HM-123", "question": "hawk-memory-api 最近的 commit 有哪些", "answer": "代码变更查询", "category": "6"}
-{"id": "HM-124", "question": "soul-engine 的进度怎么样", "answer": "项目进度查询", "category": "6"}
+{"id": "HM-123", "question": "hawk-memory-api 最近的 commit 有哪些", "answer": "hawk-bridge与hawk-memory-api关系", "category": "6"}
+{"id": "HM-124", "question": "soul-engine 的进度怎么样", "answer": "soul-engine 是记忆进化引擎，负责从 Raw Memory 提炼 Pattern → Principle → Skill。", "category": "6"}
 {"id": "HM-125", "question": "上次代码评审是什么时候", "answer": "评审时间回顾", "category": "6"}
 {"id": "HM-126", "question": "hawk-eval 的数据集现在有多少条", "answer": "数据集规模查询", "category": "6"}
-{"id": "HM-127", "question": "hawk-bridge 最近的 PR 合并了哪些", "answer": "代码合并查询", "category": "6"}
+{"id": "HM-127", "question": "hawk-bridge 最近的 PR 合并了哪些", "answer": "hawk-bridge与hawk-memory-api关系", "category": "6"}
 {"id": "HM-128", "question": "我们的技术选型文档存在哪里了", "answer": "文档位置查询", "category": "6"}
 {"id": "HM-129", "question": "hawk-eval 的评测结果存在哪个目录", "answer": "数据存储路径", "category": "6"}
-{"id": "HM-130", "question": "hawk-memory-api 的主要维护者是谁", "answer": "维护者查询", "category": "7"}
-{"id": "HM-131", "question": "Falcon 和 Hermes 是什么关系", "answer": "实体关系查询", "category": "7"}
+{"id": "HM-130", "question": "hawk-memory-api 的主要维护者是谁", "answer": "hawk-bridge与hawk-memory-api关系", "category": "7"}
+{"id": "HM-131", "question": "Falcon 和 Hermes 是什么关系", "answer": "上次让你记得我偏好 Python 编程，主要用 hermes-agent 做开发。", "category": "7"}
 {"id": "HM-132", "question": "hawk-eval 是谁建立的", "answer": "项目创建者查询", "category": "7"}
-{"id": "HM-133", "question": "m_flow 是哪家公司做的", "answer": "竞品背景查询", "category": "7"}
-{"id": "HM-134", "question": "Mem0 的 LoCoMo 数据集是谁发布的", "answer": "数据集来源查询", "category": "7"}
-{"id": "HM-135", "question": "hawk-bridge 的 Pipeline 设计参考了什么", "answer": "设计参考来源", "category": "7"}
+{"id": "HM-133", "question": "m_flow 是哪家公司做的", "answer": "下一步要搭建 hawk-eval 的测试体系，跑通 baseline 并对标 m_flow。", "category": "7"}
+{"id": "HM-134", "question": "Mem0 的 LoCoMo 数据集是谁发布的", "answer": "Mem0 在 LoCoMo 上最新分数是 MRR 91.6，Bleu 71.4。", "category": "7"}
+{"id": "HM-135", "question": "hawk-bridge 的 Pipeline 设计参考了什么", "answer": "hawk-bridge与hawk-memory-api关系", "category": "7"}
 {"id": "HM-136", "question": "neo4j 驱动是用什么语言写的", "answer": "驱动语言查询", "category": "7"}
 {"id": "HM-137", "question": "LanceDB 是哪家公司维护的", "answer": "向量库背景查询", "category": "7"}
-{"id": "HM-138", "question": "soul-engine 为什么选 TypeScript", "answer": "技术栈选择理由", "category": "7"}
-{"id": "HM-139", "question": "gql-openclaw 和 hawk-bridge 是同一个项目吗", "answer": "项目关系澄清", "category": "7"}
-{"id": "HM-140", "question": "hawk-memory-api 单次最多能存多少条记忆", "answer": "存储上限查询", "category": "8"}
+{"id": "HM-138", "question": "soul-engine 为什么选 TypeScript", "answer": "用户主要用 Python，偶尔也用 TypeScript。", "category": "7"}
+{"id": "HM-139", "question": "gql-openclaw 和 hawk-bridge 是同一个项目吗", "answer": "hawk-bridge，是 GQL 的记忆层项目，专注会话层记忆的存储和召回。", "category": "7"}
+{"id": "HM-140", "question": "hawk-memory-api 单次最多能存多少条记忆", "answer": "hawk-memory-api recall API", "category": "8"}
 {"id": "HM-141", "question": "向量检索最大支持多少维", "answer": "向量维度限制", "category": "8"}
-{"id": "HM-142", "question": "recall 接口最多返回多少条结果", "answer": "结果数量限制", "category": "8"}
+{"id": "HM-142", "question": "recall 接口最多返回多少条结果", "answer": "hawk-memory-api recall API", "category": "8"}
 {"id": "HM-143", "question": "FTS 索引支持哪些查询语法", "answer": "全文检索语法限制", "category": "8"}
-{"id": "HM-144", "question": "hawk-memory-api 对 session_id 有什么格式要求", "answer": "字段格式约束", "category": "8"}
+{"id": "HM-144", "question": "hawk-memory-api 对 session_id 有什么格式要求", "answer": "hawk-memory-api recall API", "category": "8"}
 {"id": "HM-145", "question": "agent_id 最长支持多少字符", "answer": "字段长度限制", "category": "8"}
 {"id": "HM-146", "question": "capture 接口超时时间是多久", "answer": "接口超时配置", "category": "8"}
 {"id": "HM-147", "question": "memory_id 是用什么算法生成的", "answer": "ID生成算法", "category": "8"}
 {"id": "HM-148", "question": "hawk-memory-api 的 embedding 模型支持哪些语言", "answer": "多语言支持", "category": "8"}
 {"id": "HM-149", "question": "hawk-memory-api 支持多 tenant 隔离吗", "answer": "多租户支持查询", "category": "8"}
-{"id": "HM-150", "question": "hawk-memory-api 能处理的最大文本长度是多少", "answer": "输入长度限制", "category": "8"}
-{"id": "HM-151", "question": "hawk-memory-api 的 recall 延迟 P50 是多少", "answer": "性能指标查询", "category": "8"}
-{"id": "HM-152", "question": "hawk-memory-api 的端口号是多少", "answer": "服务配置查询", "category": "8"}
-{"id": "HM-153", "question": "hawk-memory-api 的环境变量有哪些是必须的", "answer": "必需配置项", "category": "8"}
+{"id": "HM-150", "question": "hawk-memory-api 能处理的最大文本长度是多少", "answer": "hawk-memory-api recall API", "category": "8"}
+{"id": "HM-151", "question": "hawk-memory-api 的 recall 延迟 P50 是多少", "answer": "hawk-memory-api recall API", "category": "8"}
+{"id": "HM-152", "question": "hawk-memory-api 的端口号是多少", "answer": "hawk-memory-api 默认使用 18360 端口。", "category": "8"}
+{"id": "HM-153", "question": "hawk-memory-api 的环境变量有哪些是必须的", "answer": "hawk-memory-api recall API", "category": "8"}
 {"id": "HM-154", "question": "batch capture 有数量上限吗", "answer": "批量操作限制", "category": "8"}
 {"id": "HM-155", "question": "系统对同时打开的数据库连接数有限制吗", "answer": "连接数限制", "category": "8"}
 {"id": "HM-156", "question": "capture 时 importance 分数超过多少会直接丢弃", "answer": "重要性阈值", "category": "8"}
@@ -164,10 +163,10 @@
 {"id": "HM-163", "question": "为什么有时候 recall 结果顺序不稳定", "answer": "结果排序问题", "category": "9"}
 {"id": "HM-164", "question": "Neo4j 的 MERGE 操作会覆盖属性吗", "answer": "图数据库更新行为", "category": "9"}
 {"id": "HM-165", "question": "如果 embedding 服务挂了会怎样", "answer": "embedding服务故障", "category": "9"}
-{"id": "HM-166", "question": "hawk-memory-api 重启后数据会丢失吗", "answer": "持久化保证", "category": "9"}
+{"id": "HM-166", "question": "hawk-memory-api 重启后数据会丢失吗", "answer": "hawk-memory-api recall API", "category": "9"}
 {"id": "HM-167", "question": "内存占用过高应该怎么优化", "answer": "内存优化策略", "category": "9"}
 {"id": "HM-168", "question": "多进程同时写会冲突吗", "answer": "并发写入冲突", "category": "9"}
-{"id": "HM-169", "question": "为什么有时候 recall 延迟很高", "answer": "延迟问题诊断", "category": "9"}
+{"id": "HM-169", "question": "为什么有时候 recall 延迟很高", "answer": "hawk-memory-api recall API", "category": "9"}
 {"id": "HM-170", "question": "为什么 FTS 搜索有时候比向量搜索还慢", "answer": "性能问题诊断", "category": "9"}
 {"id": "HM-171", "question": "为什么有时候 capture 返回 stored=0", "answer": "空存储原因分析", "category": "9"}
 {"id": "HM-172", "question": "如果 recall 结果不对怎么排查", "answer": "检索结果异常排查", "category": "9"}
@@ -184,18 +183,18 @@
 {"id": "HM-183", "question": "记忆的生命周期状态机是怎么流转的", "answer": "记忆状态流转", "category": "10"}
 {"id": "HM-184", "question": "我之前测试的那个 case 通过了吗", "answer": "测试结果查询", "category": "10"}
 {"id": "HM-185", "question": "我们上次讨论的 recall 优化方案具体是哪三个", "answer": "优化方案回顾", "category": "3"}
-{"id": "HM-186", "question": "hawk-memory-api 的 Recall Suppression 是怎么设计的", "answer": "可见性控制设计", "category": "4"}
+{"id": "HM-186", "question": "hawk-memory-api 的 Recall Suppression 是怎么设计的", "answer": "hawk-memory-api recall API", "category": "4"}
 {"id": "HM-187", "question": "我之前让你查的那个函数实现还在吗", "answer": "代码实现回忆", "category": "5"}
 {"id": "HM-188", "question": "hawk-memory-api 的 Decay Worker 是独立进程吗", "answer": "Decay架构设计", "category": "4"}
 {"id": "HM-189", "question": "上次提到的 Memory Compiler 是什么", "answer": "Compiler概念回顾", "category": "2"}
-{"id": "HM-190", "question": "hawk-memory-api 的 recall 用了哪些检索策略", "answer": "检索策略说明", "category": "4"}
+{"id": "HM-190", "question": "hawk-memory-api 的 recall 用了哪些检索策略", "answer": "hawk-memory-api recall API", "category": "4"}
 {"id": "HM-191", "question": "我之前测试的那个配置参数组合效果如何", "answer": "配置效果回顾", "category": "5"}
 {"id": "HM-192", "question": "为什么有时向量检索会 fallback 到 FTS", "answer": "混合检索逻辑", "category": "4"}
-{"id": "HM-193", "question": "hawk-memory-api 有重试机制吗", "answer": "容错重试设计", "category": "4"}
+{"id": "HM-193", "question": "hawk-memory-api 有重试机制吗", "answer": "hawk-memory-api recall API", "category": "4"}
 {"id": "HM-194", "question": "我之前说的那个多租户方案你考虑了吗", "answer": "多租户设计讨论", "category": "3"}
 {"id": "HM-195", "question": "hawk-memory-api 支持热更新配置吗", "answer": "配置热更新能力", "category": "8"}
 {"id": "HM-196", "question": "我之前对比的那个向量模型叫什么", "answer": "模型名称回忆", "category": "5"}
-{"id": "HM-197", "question": "Falcon-Bridge 和 hawk-bridge 合并了吗", "answer": "项目合并历史", "category": "6"}
-{"id": "HM-198", "question": "hawk-memory-api 的 L0 存储层是什么", "answer": "存储层次说明", "category": "4"}
+{"id": "HM-197", "question": "Falcon-Bridge 和 hawk-bridge 合并了吗", "answer": "hawk-bridge，是 GQL 的记忆层项目，专注会话层记忆的存储和召回。", "category": "6"}
+{"id": "HM-198", "question": "hawk-memory-api 的 L0 存储层是什么", "answer": "hawk-bridge 是 L0 记忆层，hawk-memory-api 是独立的记忆 API 服务，bridge 以后会调用 API。", "category": "4"}
 {"id": "HM-199", "question": "我之前记录的 benchmark 结论是什么", "answer": "benchmark结论回忆", "category": "5"}
 {"id": "HM-200", "question": "为什么要做记忆进化，和普通存储有什么区别", "answer": "进化价值说明", "category": "2"}
