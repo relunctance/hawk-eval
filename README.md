@@ -77,6 +77,22 @@ make benchmark-all
 | 答案质量 | BLEU-1 / F1 / LLM-Judge | Mem0 |
 | 性能 | Latency P50/P99 | Mem0（0.88s） |
 
+## 最新评测结果
+
+**hawk-memory-api conversational_qa（200条中文）**
+
+| 指标 | 结果 | 目标 |
+|------|------|------|
+| **MRR@5** | **0.996** | > 0.8 ✅ |
+| MRR@1 | 1.000 | — |
+| Recall@5 | 98.0% | — |
+| BLEU-1 avg | 0.346 | — |
+| F1 avg | 0.494 | — |
+| Latency P50 | 5.95s | < 200ms ⚠️ |
+
+> 评测日期：2026-04-24
+> commit: `9b062d3`
+
 ## 数据集
 
 | 数据集 | 规模 | 来源 | 许可 |
