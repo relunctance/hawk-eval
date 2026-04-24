@@ -39,6 +39,9 @@ from metrics import compute_recall_metrics, compute_text_metrics
 
 BASE = "http://127.0.0.1:18360"
 
+EMBED_URL = "http://127.0.0.1:9997/v1/embeddings"
+EMBED_MODEL = "bge-m3"
+
 
 def req(method, path, body=None, timeout=30):
     url = BASE + path
@@ -55,6 +58,15 @@ def req(method, path, body=None, timeout=30):
             return str(e), e.code
     except Exception as e:
         return str(e), -1
+
+
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    """批量计算文本 embedding（直接调 xinference，不走 hawk-memory-api）。"""
+    body = {"model": EMBED_MODEL, "input": texts}
+    data, s = req("POST", EMBED_URL, body, timeout=30)
+    if s != 200:
+        return []
+    return [item["embedding"] for item in data.get("data", [])]
 
 
 # ─── Text Similarity ─────────────────────────────────────────────────────────
@@ -144,9 +156,12 @@ class HawkMemoryBenchmark:
         data, s = req("POST", "/capture", body)
         return s in (200, 201)
 
-    def recall(self, query: str, top_k: int = 10) -> tuple[list[dict], float]:
-        """recall，返回 (memories, latency)。"""
+    def recall(self, query: str, top_k: int = 10,
+               query_vector: list[float] | None = None) -> tuple[list[dict], float]:
+        """recall，返回 (memories, latency)。可通过 query_vector 跳过 embedding 计算。"""
         body = {"query": query, "top_k": top_k, "mode": "global"}
+        if query_vector is not None:
+            body["query_vector"] = query_vector
         t0 = time.perf_counter()
         data, s = req("POST", "/recall", body)
         latency = time.perf_counter() - t0
@@ -156,18 +171,20 @@ class HawkMemoryBenchmark:
         return data.get("memories", []), latency
 
     def capture_dataset(self, dataset: list[dict], log_fn=None) -> dict:
-        """Phase 1: capture 数据集，返回 session 文件内容供 recall 使用。
+        """Phase 1: capture 数据集 + 预计算 question embedding，返回 session 文件内容供 recall 使用。
 
         Returns: {
             "platform": str,
             "count": int,
-            "items": [{"id": str, "question": str, "answer": str}, ...]
+            "items": [{"id": str, "question": str, "answer": str, "query_vector": list[float]}, ...]
         }
         """
         if log_fn is None:
             log_fn = print
 
         log_fn(f"  [capture] {len(dataset)} 条记忆...")
+
+        # 1) capture
         ok = 0
         for i, item in enumerate(dataset):
             question = item.get("question", "")
@@ -178,6 +195,16 @@ class HawkMemoryBenchmark:
             if (i + 1) % 20 == 0:
                 log_fn(f"      进度: {i+1}/{len(dataset)}")
         log_fn(f"      已 capture {ok}/{len(dataset)} 条")
+
+        # 2) 预计算所有 question embedding（不占用 recall 路径）
+        log_fn(f"  [embedding] 预计算 {len(dataset)} 条 question 向量...")
+        questions = [
+            item.get("question", "") for item in dataset
+        ]
+        vectors = embed_texts(questions)
+        log_fn(f"      向量计算完成 ({len(vectors)}/{len(questions)})")
+
+        # 3) 等待索引就绪
         log_fn(f"  [capture] 等待索引就绪 (3s)...")
         time.sleep(3)
 
@@ -185,26 +212,30 @@ class HawkMemoryBenchmark:
             "platform": self.platform,
             "count": ok,
             "items": [
-                {"id": item.get("id", f"q-{i}"),
-                 "question": item.get("question", ""),
-                 "answer": item.get("answer") or item.get("memory_text", "")}
+                {
+                    "id": item.get("id", f"q-{i}"),
+                    "question": item.get("question", ""),
+                    "answer": item.get("answer") or item.get("memory_text", ""),
+                    "query_vector": vectors[i] if i < len(vectors) else None,
+                }
                 for i, item in enumerate(dataset)
             ],
         }
 
     def recall_eval(self, dataset: list[dict], top_k: int = 10,
                     log_fn=None) -> tuple[list[CaseResult], dict]:
-        """Phase 2: 只跑 recall，不 capture。"""
+        """Phase 2: 只跑 recall，不 capture。用 session 中的预计算 query_vector。"""
         if log_fn is None:
             log_fn = print
 
-        log_fn(f"  [recall] 评测 {len(dataset)} 条...")
+        log_fn(f"  [recall] 评测 {len(dataset)} 条（query_vector 预计算模式）...")
 
         def do_recall(item: dict, i: int) -> CaseResult:
             qid = item.get("id", f"q-{i}")
             query = item.get("question", "")
+            query_vector = item.get("query_vector")
             target_text = item.get("answer") or item.get("memory_text", "")
-            memories, latency = self.recall(query, top_k=top_k)
+            memories, latency = self.recall(query, top_k=top_k, query_vector=query_vector)
             retrieved_texts = [m.get("text", "") for m in memories]
             rank = None
             for pos, txt in enumerate(retrieved_texts):
@@ -257,6 +288,7 @@ class HawkMemoryBenchmark:
              log_fn=None) -> tuple[list[CaseResult], dict]:
         """
         运行 benchmark（合并模式，等同于 capture + recall）。
+        注意：query_vector 在 capture 后预计算，供 recall_eval 使用。
         """
         if log_fn is None:
             log_fn = print
@@ -272,6 +304,17 @@ class HawkMemoryBenchmark:
             caps = list(ex.map(do_capture, dataset))
         captured = sum(caps)
         log_fn(f"      已 capture {captured}/{len(dataset)} 条")
+
+        # 预计算 query_vector（供 recall_eval 使用）
+        log_fn(f"  [embedding] 预计算 {len(dataset)} 条 question 向量...")
+        questions = [item.get("question", "") for item in dataset]
+        vectors = embed_texts(questions)
+        log_fn(f"      向量计算完成 ({len(vectors)}/{len(questions)})")
+
+        # 给 dataset 注入 query_vector（inline 模式，不走 session 文件）
+        for i, item in enumerate(dataset):
+            item["query_vector"] = vectors[i] if i < len(vectors) else None
+
         log_fn(f"  [2] 等待索引就绪 (3s)...")
         time.sleep(3)
 
