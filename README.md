@@ -79,7 +79,29 @@ make benchmark-all
 
 ## 最新评测结果
 
-**hawk-memory-api conversational_qa（200条中文）**
+### 2026-04-24：memory_id 精确匹配 vs text 匹配
+
+**核心发现**：capture 返回 memory_id 后，用 memory_id 做精确匹配替代 text 相似度匹配，召回质量大幅提升。
+
+**验证集**：conversational_qa 前 25 条（中文）
+
+| 指标 | text匹配（旧） | memory_id匹配（新） | 提升 |
+|------|---------------|-------------------|------|
+| **MRR@5** | 0.213 | **0.946** | +344% |
+| **Recall@5** | 32% | **92%** | +188% |
+| Match Rate | — | **92% (23/25)** | — |
+
+> commit: `8c073e0`，评测日期：2026-04-24
+
+**未命中分析（2/25）**：
+- HM-024「用户的时区是哪个」：capture 时 answer 是「UTC+8」，recall query 是「时区」，语义模糊
+- HM-025「上次让我记得的事」：属于泛化类 query，需要更强的语义推理
+
+---
+
+### 历史基准：全量数据集
+
+**hawk-memory-api conversational_qa（200条中文，全量）**
 
 | 指标 | 结果 | 目标 |
 |------|------|------|
