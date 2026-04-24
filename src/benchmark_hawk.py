@@ -325,7 +325,7 @@ class HawkMemoryBenchmark:
             return [], latency
         return data.get("memories", []), latency
 
-    def capture_dataset(self, dataset: list[dict], log_fn=None) -> dict:
+    def capture_dataset(self, dataset: list[dict], log_fn=None, use_llm: bool = False) -> dict:
         """Phase 1: capture 数据集 + 预计算 question embedding，返回 session 文件内容供 recall 使用。
 
         Returns: {
@@ -337,11 +337,15 @@ class HawkMemoryBenchmark:
         if log_fn is None:
             log_fn = print
 
-        log_fn(f"  [capture] {len(dataset)} 条记忆（direct模式，绕过LLM）...")
+        mode_str = "LLM extraction" if use_llm else "direct (no LLM)"
+        log_fn(f"  [capture] {len(dataset)} 条记忆（{mode_str}）...")
 
-        # 1) direct capture (bypass LLM extraction — benchmark专用，极快)
+        # 1) capture (use LLM or not based on flag)
         t0 = time.time()
-        ok, total = self.direct_capture_batch(dataset, batch_size=50, max_workers=4)
+        if use_llm:
+            ok, total = self.capture_batch(dataset, batch_size=50, max_workers=4)
+        else:
+            ok, total = self.direct_capture_batch(dataset, batch_size=50, max_workers=4)
         elapsed = time.time() - t0
         log_fn(f"      已 capture {ok}/{total} 条 ({elapsed:.1f}s)")
 
@@ -434,17 +438,23 @@ class HawkMemoryBenchmark:
         return results, metrics
 
     def run(self, dataset: list[dict], top_k: int = 10,
-             log_fn=None, cache: dict | None = None) -> tuple[list[CaseResult], dict]:
+             log_fn=None, cache: dict | None = None,
+             use_llm: bool = False) -> tuple[list[CaseResult], dict]:
         """
         运行 benchmark（合并模式，等同于 capture + recall）。
         cache: 预计算的 query_embeddings（来自 load_cache）。
+        use_llm: True=走 LLM extraction (/capture/batch)，False=direct存储 (/direct_capture)。
         """
         if log_fn is None:
             log_fn = print
 
-        log_fn(f"  [1] Capture {len(dataset)} 条记忆（direct模式，绕过LLM）...")
+        mode_str = "LLM extraction" if use_llm else "direct (no LLM)"
+        log_fn(f"  [1] Capture {len(dataset)} 条记忆（{mode_str}）...")
         t0 = time.time()
-        captured, total = self.direct_capture_batch(dataset, batch_size=50, max_workers=4)
+        if use_llm:
+            captured, total = self.capture_batch(dataset, batch_size=50, max_workers=4)
+        else:
+            captured, total = self.direct_capture_batch(dataset, batch_size=50, max_workers=4)
         elapsed = time.time() - t0
         log_fn(f"      已 capture {captured}/{total} 条 ({elapsed:.1f}s)")
 
@@ -485,6 +495,11 @@ def main():
                        help="capture=只 capture 数据集；recall=只评测 recall；both=两者都做（默认）")
     parser.add_argument("--session-file",
                        help="capture/recall 共享的 session 文件路径（Phase 间传递数据）")
+    parser.add_argument("--llm", dest="use_llm", action="store_true",
+                       help="走 LLM extraction (/capture/batch)，较慢但真实")
+    parser.add_argument("--no-llm", dest="use_llm", action="store_false",
+                       help="不走 LLM 直接存储 (/direct_capture)，快（默认）")
+    parser.set_defaults(use_llm=False)
     args = parser.parse_args()
 
     from datetime import datetime
@@ -531,7 +546,7 @@ def main():
     metrics = {}
 
     if args.mode == "capture":
-        session_data = bm.capture_dataset(dataset, log_fn=log_print)
+        session_data = bm.capture_dataset(dataset, log_fn=log_print, use_llm=args.use_llm)
         if args.session_file:
             Path(args.session_file).parent.mkdir(parents=True, exist_ok=True)
             with open(args.session_file, "w") as f:
@@ -549,7 +564,7 @@ def main():
 
     if args.mode == "both":
         # run() handles capture + recall internally
-        results, metrics = bm.run(dataset, top_k=args.top_k, log_fn=log_print, cache=cache)
+        results, metrics = bm.run(dataset, top_k=args.top_k, log_fn=log_print, cache=cache, use_llm=args.use_llm)
 
     if not results and metrics:
         log_print("\n（capture-only 模式，无评测结果）")
