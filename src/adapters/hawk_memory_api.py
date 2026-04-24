@@ -70,13 +70,17 @@ class HawkMemoryAdapter:
         query: str,
         top_k: int = 10,
         platform: str = None,
+        rewrite: bool = False,
     ) -> dict[str, Any]:
         """
         执行 recall，返回 {"memories": [...], "latency": float}
 
         memories 每项包含 id / text / score / category
+
+        Args:
+            rewrite: if True, use LLM query rewriting before search (KR2.4)
         """
-        body = {"query": query, "top_k": top_k}
+        body = {"query": query, "top_k": top_k, "rewrite": rewrite}
         if platform:
             body["platform"] = platform
         else:

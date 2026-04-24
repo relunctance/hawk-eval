@@ -389,10 +389,15 @@ class HawkMemoryBenchmark:
         return stored, total, memory_ids
 
     def recall(self, query: str, top_k: int = 10,
-               query_vector: list[float] | None = None) -> tuple[list[dict], float]:
-        """recall，返回 (memories, latency)。可通过 query_vector 跳过 embedding 计算。"""
+               query_vector: list[float] | None = None,
+               rewrite: bool = False) -> tuple[list[dict], float]:
+        """recall，返回 (memories, latency)。可通过 query_vector 跳过 embedding 计算。
+
+        Args:
+            rewrite: if True, use LLM query rewriting before search (KR2.4)
+        """
         body = {"query": query, "top_k": top_k, "mode": "platform_only",
-                "platform": self.platform, "agent_id": "eval"}
+                "platform": self.platform, "agent_id": "eval", "rewrite": rewrite}
         if query_vector is not None:
             body["query_vector"] = query_vector
         t0 = time.perf_counter()
@@ -462,7 +467,7 @@ class HawkMemoryBenchmark:
         }
 
     def recall_eval(self, dataset: list[dict], top_k: int = 10,
-                    log_fn=None) -> tuple[list[CaseResult], dict]:
+                    log_fn=None, rewrite: bool = False) -> tuple[list[CaseResult], dict]:
         """Phase 2: 只跑 recall，不 capture。用 session 中的预计算 query_vector。"""
         if log_fn is None:
             log_fn = print
@@ -475,7 +480,7 @@ class HawkMemoryBenchmark:
             query_vector = item.get("query_vector")
             target_memory_id = item.get("memory_id", "")
             target_text = item.get("answer") or item.get("memory_text", "")
-            memories, latency = self.recall(query, top_k=top_k, query_vector=query_vector)
+            memories, latency = self.recall(query, top_k=top_k, query_vector=query_vector, rewrite=rewrite)
 
             # Primary: exact memory_id match (precise, no ambiguity)
             rank = None
@@ -542,7 +547,8 @@ class HawkMemoryBenchmark:
 
     def run(self, dataset: list[dict], top_k: int = 10,
              log_fn=None, cache: dict | None = None,
-             use_llm: bool = False) -> tuple[list[CaseResult], dict]:
+             use_llm: bool = False,
+             rewrite: bool = False) -> tuple[list[CaseResult], dict]:
         """
         运行 benchmark（合并模式，等同于 capture + recall）。
         cache: 预计算的 query_embeddings（来自 load_cache）。
@@ -585,7 +591,7 @@ class HawkMemoryBenchmark:
         log_fn(f"  [2] 等待索引就绪 (3s)...")
         time.sleep(3)
 
-        return self.recall_eval(dataset, top_k=top_k, log_fn=log_fn)
+        return self.recall_eval(dataset, top_k=top_k, log_fn=log_fn, rewrite=rewrite)
 
 
 def main():
@@ -609,7 +615,9 @@ def main():
                        help="走 LLM extraction (/capture/batch)，较慢但真实")
     parser.add_argument("--no-llm", dest="use_llm", action="store_false",
                        help="不走 LLM 直接存储 (/direct_capture)，快（默认）")
-    parser.set_defaults(use_llm=False)
+    parser.add_argument("--rewrite", action="store_true",
+                       help="recall 时启用 Query Rewrite（KR2.4，MRR+0.23）")
+    parser.set_defaults(use_llm=False, rewrite=False)
     args = parser.parse_args()
 
     from datetime import datetime
@@ -670,11 +678,11 @@ def main():
                 session_data = json.load(f)
             dataset = session_data["items"]
             log_print(f"[recall] 从 session 加载 {len(dataset)} 条（忽略 --offset/--limit）")
-        results, metrics = bm.recall_eval(dataset, top_k=args.top_k, log_fn=log_print)
+        results, metrics = bm.recall_eval(dataset, top_k=args.top_k, log_fn=log_print, rewrite=args.rewrite)
 
     if args.mode == "both":
         # run() handles capture + recall internally
-        results, metrics = bm.run(dataset, top_k=args.top_k, log_fn=log_print, cache=cache, use_llm=args.use_llm)
+        results, metrics = bm.run(dataset, top_k=args.top_k, log_fn=log_print, cache=cache, use_llm=args.use_llm, rewrite=args.rewrite)
 
     if not results and metrics:
         log_print("\n（capture-only 模式，无评测结果）")
