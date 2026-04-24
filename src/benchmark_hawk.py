@@ -23,6 +23,7 @@ hawk-memory-api Recall Benchmark
 import argparse
 import json
 import sys
+import hashlib
 import time
 import uuid
 import urllib.request
@@ -38,6 +39,29 @@ from metrics import compute_recall_metrics, compute_text_metrics
 # ─── HTTP ───────────────────────────────────────────────────────────────────
 
 BASE = "http://127.0.0.1:18360"
+
+DEFAULT_CACHE = "data/query_embeddings_cache.json"
+
+
+def load_cache(dataset_path: str) -> dict | None:
+    """检测并加载预计算缓存。"""
+    cache_file = Path(DEFAULT_CACHE)
+    if not cache_file.exists():
+        return None
+    with open(cache_file) as f:
+        cache = json.load(f)
+    fp = dataset_fingerprint(dataset_path)
+    if cache.get("fingerprint") != fp:
+        return None
+    return cache
+
+
+def dataset_fingerprint(dataset_path: str) -> str:
+    """对数据集内容做 hash，用于判断缓存是否过期。"""
+    with open(dataset_path) as f:
+        content = f.read()
+    return hashlib.sha256(content.encode()).hexdigest()[:12]
+
 
 EMBED_URL = "http://127.0.0.1:9997/v1/embeddings"
 EMBED_MODEL = "bge-m3"
@@ -291,35 +315,47 @@ class HawkMemoryBenchmark:
         return results, metrics
 
     def run(self, dataset: list[dict], top_k: int = 10,
-             log_fn=None) -> tuple[list[CaseResult], dict]:
+             log_fn=None, cache: dict | None = None) -> tuple[list[CaseResult], dict]:
         """
         运行 benchmark（合并模式，等同于 capture + recall）。
-        注意：query_vector 在 capture 后预计算，供 recall_eval 使用。
+        cache: 预计算的 query_embeddings（来自 load_cache）。
         """
         if log_fn is None:
             log_fn = print
 
-        log_fn(f"  [1] Capture {len(dataset)} 条记忆...")
+        log_fn(f"  [1] Capture {len(dataset)} 条记忆（并行）...")
 
-        def do_capture(item: dict) -> bool:
+        def do_capture(item: dict) -> tuple[int, bool]:
+            idx = id(item)
             question = item.get("question", "")
             answer = item.get("answer") or item.get("memory_text") or ""
-            return bool(question and answer and self.capture_qa(question, answer))
+            ok = bool(question and answer and self.capture_qa(question, answer))
+            return id(item), ok
 
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            caps = list(ex.map(do_capture, dataset))
-        captured = sum(caps)
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            futures = {ex.submit(do_capture, item): i
+                       for i, item in enumerate(dataset)}
+            done = 0
+            for future in as_completed(futures):
+                done += 1
+                if done % 20 == 0 or done == len(dataset):
+                    log_fn(f"      capture 进度: {done}/{len(dataset)}")
+        captured = sum(ok for _, ok in [f.result() for f in futures])
         log_fn(f"      已 capture {captured}/{len(dataset)} 条")
 
-        # 预计算 query_vector（供 recall_eval 使用）
-        log_fn(f"  [embedding] 预计算 {len(dataset)} 条 question 向量...")
-        questions = [item.get("question", "") for item in dataset]
-        vectors = embed_texts(questions)
-        log_fn(f"      向量计算完成 ({len(vectors)}/{len(questions)})")
-
-        # 给 dataset 注入 query_vector（inline 模式，不走 session 文件）
-        for i, item in enumerate(dataset):
-            item["query_vector"] = vectors[i] if i < len(vectors) else None
+        # 注入 query_vector（来自缓存，或实时计算）
+        if cache is not None:
+            log_fn(f"  [embedding] 从缓存加载 {len(dataset)} 条 question 向量...")
+            for i, item in enumerate(dataset):
+                cache_item = cache["items"][i] if i < len(cache.get("items", [])) else {}
+                item["query_vector"] = cache_item.get("query_vector")
+        else:
+            log_fn(f"  [embedding] 预计算 {len(dataset)} 条 question 向量...")
+            questions = [item.get("question", "") for item in dataset]
+            vectors = embed_texts(questions)
+            log_fn(f"      向量计算完成 ({len(vectors)}/{len(questions)})")
+            for i, item in enumerate(dataset):
+                item["query_vector"] = vectors[i] if i < len(vectors) else None
 
         log_fn(f"  [2] 等待索引就绪 (3s)...")
         time.sleep(3)
@@ -374,6 +410,16 @@ def main():
 
     log_print("✅ hawk-memory-api health OK")
 
+    # 尝试加载预计算缓存
+    cache = None
+    if args.mode in ("both", "recall"):
+        cache = load_cache(args.dataset)
+        if cache:
+            log_print(f"✅ 预计算缓存命中: {cache['count']} 条 (fingerprint: {cache.get('fingerprint', '?')})")
+        else:
+            log_print("⚠️  未找到预计算缓存，将实时计算 embedding（较慢）")
+            log_print("   运行: python scripts/precompute_query_embeddings.py --dataset ... 预计算缓存")
+
     results = []
     metrics = {}
 
@@ -396,7 +442,7 @@ def main():
 
     if args.mode == "both":
         # run() handles capture + recall internally
-        results, metrics = bm.run(dataset, top_k=args.top_k, log_fn=log_print)
+        results, metrics = bm.run(dataset, top_k=args.top_k, log_fn=log_print, cache=cache)
 
     if not results and metrics:
         log_print("\n（capture-only 模式，无评测结果）")

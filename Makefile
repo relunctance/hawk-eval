@@ -13,7 +13,9 @@ help:
 	@echo "  make test-smoke       快速冒烟测试（~15s，核心路径）"
 	@echo "  make test-self-check  自检脚本（无需网络）"
 	@echo "  make benchmark-hawk       跑 hawk-memory-api recall benchmark"
-	@echo "  make benchmark-hawk-proc  跑 hawk-memory-api procedural benchmark"
+	@echo "  make precompute          预计算 query embeddings 缓存（一次性，约30s）"
+	@echo "  make benchmark-hawk-quick    快速冒烟测试（20条，~2min）"
+	@echo "  make benchmark-hawk-proc    跑 hawk-memory-api procedural benchmark"
 	@echo "  make benchmark-m-flow     跑 m_flow procedural benchmark"
 	@echo "  make benchmark-all        跑完整竞品对比"
 	@echo "  make compare              生成竞品对比报告"
@@ -50,6 +52,20 @@ benchmark-hawk:
 	@PYTHONPATH=src $(PYTHON) -m src.benchmark_hawk \
 		--dataset datasets/hawk_memory/conversational_qa.jsonl \
 		--output reports/hawk_recall_$(VERSION).json
+
+precompute:
+	@echo "[precompute] 预计算 query embeddings (200条)..."
+	@$(PYTHON) scripts/precompute_query_embeddings.py \
+		--dataset datasets/hawk_memory/conversational_qa.jsonl \
+		--output data/query_embeddings_cache.json
+
+benchmark-hawk-quick:
+	@echo "[benchmark] hawk-memory-api recall benchmark (quick 20条)..."
+	@mkdir -p reports
+	@PYTHONPATH=src $(PYTHON) -m src.benchmark_hawk \
+		--dataset datasets/hawk_memory/conversational_qa.jsonl \
+		--limit 20 \
+		--output reports/hawk_recall_quick.json
 
 benchmark-hawk-proc:
 	@echo "[benchmark] hawk-memory-api procedural benchmark..."
