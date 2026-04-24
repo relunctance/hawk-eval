@@ -160,7 +160,7 @@ class HawkMemoryBenchmark:
         data, s = req("GET", "/health")
         return s == 200 and data.get("status") == "ok"
 
-    def capture_qa(self, question: str, answer: str) -> bool:
+    def capture_qa(self, question: str, answer: str, retries: int = 2) -> bool:
         """存入一组 QA 记忆（question → message, answer → response，建立问答关联）。"""
         session = f"bm-{uuid.uuid4().hex[:8]}"
         body = {
@@ -170,8 +170,13 @@ class HawkMemoryBenchmark:
             "response": answer,
             "platform": self.platform,
         }
-        data, s = req("POST", "/capture", body)
-        return s in (200, 201)
+        for attempt in range(retries + 1):
+            data, s = req("POST", "/capture", body)
+            if s in (200, 201):
+                return True
+            if attempt < retries:
+                time.sleep(1)
+        return False
 
     def capture(self, text: str) -> bool:
         """存入一条记忆（兼容旧接口）。"""
@@ -283,7 +288,7 @@ class HawkMemoryBenchmark:
                               latency=latency, bleu1=bleu1, f1=f1)
 
         results: list[CaseResult] = []
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
             futures = {executor.submit(do_recall, item, i): i
                        for i, item in enumerate(dataset)}
             done = 0
@@ -332,7 +337,7 @@ class HawkMemoryBenchmark:
             ok = bool(question and answer and self.capture_qa(question, answer))
             return id(item), ok
 
-        with ThreadPoolExecutor(max_workers=8) as ex:
+        with ThreadPoolExecutor(max_workers=3) as ex:
             futures = {ex.submit(do_capture, item): i
                        for i, item in enumerate(dataset)}
             done = 0
