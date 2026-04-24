@@ -250,7 +250,8 @@ class HawkMemoryBenchmark:
 
         return captured, total
 
-    def direct_capture_batch(self, items: list[dict], batch_size: int = 50, max_workers: int = 4) -> tuple[int, int]:
+    def direct_capture_batch(self, items: list[dict], batch_size: int = 50, max_workers: int = 4,
+                            agent_id: str = "eval") -> tuple[int, int]:
         """
         批量 direct capture，使用 /direct_capture 端点（完全绕过 LLM extraction）。
 
@@ -293,7 +294,7 @@ class HawkMemoryBenchmark:
                 "memories": batch,
                 "session_id": f"bm-{uuid.uuid4().hex[:8]}",
                 "platform": self.platform,
-                "agent_id": "eval",
+                "agent_id": agent_id,
             }
             data, s = req("POST", "/direct_capture", body)
             if s in (200, 201):
@@ -318,16 +319,15 @@ class HawkMemoryBenchmark:
 
         return stored, total, all_ids
 
-    def direct_capture_batch_with_ids(self, items: list[dict], batch_size: int = 50, max_workers: int = 4) -> tuple[int, int, list[str]]:
+    def direct_capture_batch_with_ids(self, items: list[dict], batch_size: int = 50, max_workers: int = 4,
+                                     agent_id: str = "eval") -> tuple[int, int, list[str], list[dict]]:
         """
-        批量 direct capture，返回每条记忆的 memory_id（按原 items 顺序对齐）。
-
-        与 direct_capture_batch 的区别：返回的 memory_ids 列表与输入 items 一一对应，
-        方便 hawk-eval 用 memory_id 做 ground-truth 评测。
+        批量 direct capture，返回每条记忆的 memory_id 和预计算的 query_vector（按原 items 顺序对齐）。
 
         Returns:
-            (success_count, total_count, memory_ids)
-            memory_ids: list of memory_ids，顺序与原 items 对齐（answer 为空的项对应空字符串）
+            (success_count, total_count, memory_ids, session_items)
+            memory_ids: list of memory_ids，顺序与原 items 对齐
+            session_items: list of dicts with {id, memory_id, question, answer, query_vector}
         """
         # Build memories in parallel with tracking original indices
         memories_by_idx: list[tuple[int, dict]] = []  # (original_idx, memory_dict)
@@ -347,7 +347,7 @@ class HawkMemoryBenchmark:
             }))
 
         if not memories_by_idx:
-            return 0, len(items), [""] * len(items)
+            return 0, len(items), [""] * len(items), []
 
         total = len(items)
 
@@ -358,12 +358,11 @@ class HawkMemoryBenchmark:
                 "memories": memories,
                 "session_id": f"bm-{uuid.uuid4().hex[:8]}",
                 "platform": self.platform,
-                "agent_id": "eval",
+                "agent_id": agent_id,
             }
             data, s = req("POST", "/direct_capture", body)
             if s in (200, 201):
                 ids = data.get("memory_ids", [])
-                # Pair original indices with returned IDs (aligned with batch order)
                 return data.get("stored", 0), list(zip([idx for idx, _ in batch], ids))
             return 0, []
 
@@ -371,7 +370,6 @@ class HawkMemoryBenchmark:
         batches = [memories_by_idx[i:i + batch_size] for i in range(0, len(memories_by_idx), batch_size)]
 
         stored = 0
-        # index_to_memory_id: original_idx -> memory_id
         index_to_memory_id: dict[int, str] = {}
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
             futures = {ex.submit(send_batch, batch): len(batch) for batch in batches}
@@ -384,9 +382,24 @@ class HawkMemoryBenchmark:
                 except Exception:
                     pass
 
-        # Build aligned memory_ids list (empty string for skipped items)
         memory_ids = [index_to_memory_id.get(i, "") for i in range(total)]
-        return stored, total, memory_ids
+
+        # 预计算 question embedding（用于 recall_eval 的 query_vector）
+        questions = [item.get("question", "") for item in items]
+        vectors = embed_texts(questions)
+
+        session_items = [
+            {
+                "id": items[i].get("id", f"q-{i}"),
+                "memory_id": memory_ids[i] if i < len(memory_ids) else "",
+                "question": questions[i],
+                "answer": items[i].get("answer") or items[i].get("memory_text", ""),
+                "query_vector": vectors[i] if i < len(vectors) else None,
+            }
+            for i in range(total)
+        ]
+
+        return stored, total, memory_ids, session_items
 
     def recall(self, query: str, top_k: int = 10,
                query_vector: list[float] | None = None,
@@ -568,7 +581,7 @@ class HawkMemoryBenchmark:
             captured, total = self.capture_batch(dataset, batch_size=50, max_workers=4)
             memory_ids = []
         else:
-            captured, total, memory_ids = self.direct_capture_batch_with_ids(dataset, batch_size=50, max_workers=4)
+            captured, total, memory_ids, _session_items = self.direct_capture_batch_with_ids(dataset, batch_size=50, max_workers=4)
         elapsed = time.time() - t0
         log_fn(f"      已 capture {captured}/{total} 条 ({elapsed:.1f}s)")
 
