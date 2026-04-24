@@ -1,4 +1,4 @@
-.PHONY: help test benchmark-hawk benchmark-hawk-proc benchmark-m-flow benchmark-locomo benchmark-evolving benchmark-all compare install benchmark-preflight benchmark-hawk-clean
+.PHONY: help test benchmark-hawk benchmark-hawk-proc benchmark-m-flow benchmark-locomo benchmark-evolving benchmark-all benchmark-multi-agent compare install benchmark-preflight benchmark-hawk-clean
 
 PYTHON := python3
 PYTEST := pytest
@@ -131,6 +131,14 @@ benchmark-all: benchmark-hawk benchmark-m-flow
 		-r reports/hawk_recall_$(VERSION).json \
 		   reports/m_flow_procedural_$(VERSION).json \
 		-o reports/compare_$(VERSION).md
+
+benchmark-multi-agent:
+	@echo "[benchmark] 多 agent 评测（KR3.4）..."
+	@mkdir -p reports
+	@PYTHONPATH=src $(PYTHON) -m src.benchmark_multi_agent \
+		--dataset datasets/hawk_memory/conversational_qa.jsonl \
+		--agents user1,user2,user3 \
+		--output reports/multi_agent.json
 
 # ─── 报告 ────────────────────────────────────────────────────────────────────
 
