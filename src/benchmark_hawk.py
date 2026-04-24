@@ -249,6 +249,68 @@ class HawkMemoryBenchmark:
 
         return captured, total
 
+    def direct_capture_batch(self, items: list[dict], batch_size: int = 50, max_workers: int = 4) -> tuple[int, int]:
+        """
+        批量 direct capture，使用 /direct_capture 端点（完全绕过 LLM extraction）。
+
+        用途：benchmark / 评测专用 — 直接存储 ground-truth，测 recall 能力。
+        不走 LLM extraction，所以极快（只算 embedding）。
+
+        Args:
+            items: list of dicts with 'question' and 'answer' (or 'memory_text') keys
+            batch_size: items per batch request (default 50)
+            max_workers: concurrent HTTP requests (default 4)
+
+        Returns:
+            (success_count, total_count)
+        """
+        # Build DirectCaptureItem list (ground truth, no extraction)
+        memories = []
+        for item in items:
+            answer = item.get("answer") or item.get("memory_text") or ""
+            if not answer:
+                continue
+            memories.append({
+                "text": answer,
+                "category": "other",
+                "importance": 1.0,
+                "name": "",
+                "description": "",
+                "metadata": {
+                    "question": item.get("question", ""),
+                },
+            })
+
+        if not memories:
+            return 0, len(items)
+
+        total = len(memories)
+
+        def send_batch(batch: list[dict]) -> int:
+            body = {
+                "memories": batch,
+                "session_id": f"bm-{uuid.uuid4().hex[:8]}",
+                "platform": self.platform,
+            }
+            data, s = req("POST", "/direct_capture", body)
+            if s in (200, 201):
+                return data.get("stored", 0)
+            return 0
+
+        # Split into batches and process concurrently
+        batches = [memories[i:i + batch_size] for i in range(0, len(memories), batch_size)]
+
+        stored = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = {ex.submit(send_batch, batch): len(batch) for batch in batches}
+            for future in as_completed(futures):
+                try:
+                    stored += future.result()
+                except Exception:
+                    pass
+
+        return stored, total
+
     def recall(self, query: str, top_k: int = 10,
                query_vector: list[float] | None = None) -> tuple[list[dict], float]:
         """recall，返回 (memories, latency)。可通过 query_vector 跳过 embedding 计算。"""
@@ -275,11 +337,11 @@ class HawkMemoryBenchmark:
         if log_fn is None:
             log_fn = print
 
-        log_fn(f"  [capture] {len(dataset)} 条记忆（batch模式）...")
+        log_fn(f"  [capture] {len(dataset)} 条记忆（direct模式，绕过LLM）...")
 
-        # 1) capture using batch endpoint (much faster than sequential capture_qa)
+        # 1) direct capture (bypass LLM extraction — benchmark专用，极快)
         t0 = time.time()
-        ok, total = self.capture_batch(dataset, batch_size=50, max_workers=4)
+        ok, total = self.direct_capture_batch(dataset, batch_size=50, max_workers=4)
         elapsed = time.time() - t0
         log_fn(f"      已 capture {ok}/{total} 条 ({elapsed:.1f}s)")
 
@@ -380,9 +442,9 @@ class HawkMemoryBenchmark:
         if log_fn is None:
             log_fn = print
 
-        log_fn(f"  [1] Capture {len(dataset)} 条记忆（batch模式）...")
+        log_fn(f"  [1] Capture {len(dataset)} 条记忆（direct模式，绕过LLM）...")
         t0 = time.time()
-        captured, total = self.capture_batch(dataset, batch_size=50, max_workers=4)
+        captured, total = self.direct_capture_batch(dataset, batch_size=50, max_workers=4)
         elapsed = time.time() - t0
         log_fn(f"      已 capture {captured}/{total} 条 ({elapsed:.1f}s)")
 
