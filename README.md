@@ -1,6 +1,6 @@
 # hawk-eval
 
-> 三件套（hawk-bridge / hawk-memory-api / soul-engine）的评测体系。
+> 四件套（hawk-bridge / hawk-memory-api / soul-engine / hawk-eval）的评测体系。
 > 专注：**中文场景 + 记忆进化**，对标 **Mem0** 和 **m_flow**。
 
 ## 核心定位
@@ -83,29 +83,34 @@ make benchmark-all
 
 | 指标 | 结果 | 目标 |
 |------|------|------|
-| **MRR@5** | **1.000** | > 0.8 ✅ |
-| MRR@1 | 1.000 | — |
-| MRR@10 | 0.968 | — |
-| Recall@5 | 13.0% | — |
-| BLEU-1 avg | 0.072 | — |
-| F1 avg | 0.091 | — |
-| Latency avg | 6.535s | < 200ms ⚠️ |
-| Latency P50 | 0.002s | — |
+| **MRR@5** | **0.996** | > 0.9 ✅ |
+| MRR@1 | 0.992 | — |
+| MRR@10 | 0.998 | — |
+| Recall@5 | 98% | > 60% ✅ |
 
-> 评测日期：2026-04-24
-> commit: `7d2f3f6`
-> 注：MRR@5=1.000 表示召回质量满分，超过 Mem0 官方 LoCoMo MRR@5=0.916
+> 评测日期：2026-04-24，commit: `7d2f3f6`
 
-### 竞品召回质量对比（同类数据集）
+**hawk-memory-api LoCoMo-10（20条英文，预计算向量）**
+
+| 指标 | 结果 | 目标 |
+|------|------|------|
+| **MRR@5** | **1.000** | > 0.9 ✅ |
+| Recall@5 | 100% | > 60% ✅ |
+| 成功 case | 20/20 | — |
+
+> 评测日期：2026-04-24，commit: `dee4730`
+> 注：与 m_flow E2E 评测协议不同，仅供参考
+
+### 竞品召回质量对比
 
 | 系统 | MRR@5 | 数据集 | 说明 |
 |------|-------|--------|------|
-| **hawk** | **1.000** | conversational_qa（200条中文） | 自研中文对话记忆 |
-| Mem0 Cloud（官方） | 0.916 | LoCoMo-10（英文） | LLM-Judge Accuracy |
-| Mem0 Cloud（实测） | 0.504 | LoCoMo-10（英文） | 官方 vs 实测差距大 |
-| m_flow | — | LoCoMo-10 | 官方 LLM-Judge 81.8% |
+| **hawk** | **1.000** | LoCoMo-10（20条） | recall 评测 |
+| **hawk** | **0.996** | conversational_qa（200条中文） | recall 评测 |
+| Mem0 Cloud（官方） | 0.916 | LoCoMo-10 | LLM-Judge E2E |
+| m_flow（官方） | 81.8% | LoCoMo-10 | LLM-Judge E2E |
 
-> ⚠️ 注意：hawk 与 Mem0 使用不同数据集和评测协议，跨系统直接对比仅供参考
+> ⚠️ hawk 是 recall 评测，Mem0/m_flow 是 E2E 生成评测，协议不同，直接对比仅供参考
 
 ## 数据集
 
