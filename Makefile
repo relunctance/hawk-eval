@@ -1,4 +1,4 @@
-.PHONY: help test benchmark-hawk benchmark-hawk-proc benchmark-m-flow benchmark-locomo benchmark-evolving benchmark-all compare install
+.PHONY: help test benchmark-hawk benchmark-hawk-proc benchmark-m-flow benchmark-locomo benchmark-evolving benchmark-all compare install benchmark-preflight benchmark-hawk-clean
 
 PYTHON := python3
 PYTEST := pytest
@@ -15,6 +15,8 @@ help:
 	@echo "  make benchmark-hawk       跑 hawk-memory-api recall benchmark"
 	@echo "  make precompute          预计算 query embeddings 缓存（一次性，约30s）"
 	@echo "  make benchmark-hawk-quick    快速冒烟测试（20条，~2min）"
+	@echo "  make benchmark-preflight    运行 benchmark 前置检查"
+	@echo "  make benchmark-hawk-clean  清理 eval 残留后跑 benchmark"
 	@echo "  make benchmark-hawk-proc    跑 hawk-memory-api procedural benchmark"
 	@echo "  make benchmark-m-flow     跑 m_flow procedural benchmark"
 	@echo "  make benchmark-all        跑完整竞品对比"
@@ -46,7 +48,7 @@ test-self-check:
 
 # ─── Hawk Memory API Benchmarks ───────────────────────────────────────────────
 
-benchmark-hawk:
+benchmark-hawk: benchmark-preflight
 	@echo "[benchmark] hawk-memory-api recall benchmark..."
 	@mkdir -p reports
 	@PYTHONPATH=src $(PYTHON) -m src.benchmark_hawk \
@@ -59,6 +61,10 @@ precompute:
 		--dataset datasets/hawk_memory/conversational_qa.jsonl \
 		--output data/query_embeddings_cache.json
 
+benchmark-preflight:
+	@echo "[preflight] 运行 benchmark 前置检查..."
+	@PYTHONPATH=src $(PYTHON) scripts/benchmark_preflight.py
+
 benchmark-hawk-quick:
 	@echo "[benchmark] hawk-memory-api recall benchmark (quick 20条)..."
 	@mkdir -p reports
@@ -66,6 +72,16 @@ benchmark-hawk-quick:
 		--dataset datasets/hawk_memory/conversational_qa.jsonl \
 		--limit 20 \
 		--output reports/hawk_recall_quick.json
+
+benchmark-hawk-clean:
+	@echo "[clean] 清理 eval 残留数据 + 跑 benchmark..."
+	@curl -s -X POST "http://127.0.0.1:18360/admin/cleanup" \
+		-H "Content-Type: application/json" \
+		-d '{"agent_id":"eval"}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'已清理 {d.get(\"deleted\",0)} 条 eval 记忆')"
+	@mkdir -p reports
+	@PYTHONPATH=src $(PYTHON) -m src.benchmark_hawk \
+		--dataset datasets/hawk_memory/conversational_qa.jsonl \
+		--output reports/hawk_recall_$(VERSION).json
 
 benchmark-hawk-proc:
 	@echo "[benchmark] hawk-memory-api procedural benchmark..."
