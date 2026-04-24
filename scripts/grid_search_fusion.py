@@ -1,181 +1,237 @@
 #!/usr/bin/env python3
 """
-Grid search fusion weights (alpha, beta, gamma) for MRR@5 optimization.
+Grid Search Fusion Weights — KR2.5
+测试不同 fusion 权重组合对 MRR@5 的影响。
 
-Collects raw vector+keyword scores from /recall_debug for all dataset cases,
-then does offline grid search to find optimal alpha/beta/gamma.
+权重配置:
+  α (alpha) = vector/semantic weight  (当前 0.75)
+  β (beta)  = keyword weight          (当前 0.15)
+  γ (gamma)  = RRF rank bonus weight   (当前 0.10)
+  rrf_k = 60 (固定)
 
-Usage:
-    python scripts/grid_search_fusion.py
+测试空间（精简，去掉无效组合 α+β+γ=1）：
+  α ∈ {0.50, 0.60, 0.70, 0.75, 0.80}
+  β ∈ {0.10, 0.15, 0.20, 0.25}
+  γ ∈ {0.05, 0.10, 0.15}
 
-Requires hawk-memory-api running and dataset populated via benchmark_hawk.py.
+总计约 5×4×3 = 60 组合（去重后约 40 组）
 """
 
 import json
+import itertools
 import requests
-from collections import defaultdict
-from itertools import product
+import time
+from pathlib import Path
 
-
-API = "http://127.0.0.1:18360"
-DATASET = "datasets/hawk_memory/conversational_qa.jsonl"
+DATASET = Path(__file__).parent.parent / "datasets" / "hawk_memory" / "conversational_qa.jsonl"
+API_URL = "http://127.0.0.1:18360/recall_debug"
 TOP_K = 5
-RRF_K = 60
 
 
-def load_dataset(path: str) -> list[dict]:
+def load_dataset():
+    with open(DATASET) as f:
+        return [json.loads(line) for line in f]
+
+
+def load_precomputed_vectors(path: str) -> dict[str, list[float]]:
+    """Load precomputed query embeddings from precompute script output."""
     with open(path) as f:
-        return [json.loads(line) for line in f if line.strip()]
+        data = json.load(f)  # JSON (not JSONL): {"version":"v1","items":[...]}
+    items = data.get("items", [])
+    return {item["id"]: item["query_vector"] for item in items if "query_vector" in item}
 
 
-def fetch_recall_debug(question: str, top_k: int = TOP_K) -> list[dict]:
-    """Recall with debug mode, return raw scores for all fetched results."""
-    payload = {
-        "query": question,
-        "agent_id": "eval",
+def recall_with_scores(query: str, top_k: int = 20, query_vector: list[float] | None = None) -> list[dict]:
+    """Call recall_debug endpoint, return raw scores for all candidates.
+    
+    Uses platform_only + agent_id=eval to match benchmark mode.
+    Does NOT use rewrite (benchmark also doesn't use rewrite).
+    """
+    body = {
+        "query": query,
         "top_k": top_k,
-        "min_score": 0.0,  # 接受低分结果，用于 grid search
+        "mode": "platform_only",
+        "platform": "hermes",
+        "agent_id": "eval",
+        "rewrite": False,  # match benchmark mode
     }
-    resp = requests.post(f"{API}/recall_debug", json=payload, timeout=30)
-    if resp.status_code != 200:
-        print(f"  WARNING: recall failed with {resp.status_code}: {resp.text[:200]}")
-        return []
+    if query_vector is not None:
+        body["query_vector"] = query_vector
+    resp = requests.post(
+        API_URL,
+        json=body,
+        timeout=30,
+    )
+    resp.raise_for_status()
     data = resp.json()
-    return data.get("memories", [])
+    return data["memories"]  # list of MemoryItemDebug
 
 
-def fused_score(vec_raw, kw_raw, kw_rank, alpha, beta, gamma):
-    """Compute fused score with given weights."""
-    import math
-    # RRF bonus
-    rrf_bonus = 1.0 / (RRF_K + kw_rank) if kw_rank > 0 else 0.0
-    return alpha * vec_raw + beta * kw_raw + gamma * rrf_bonus
+def fused_score(
+    vec_raw: float,
+    kw_raw: float,
+    kw_rank: int,
+    alpha: float,
+    beta: float,
+    gamma: float,
+    vec_min: float,
+    vec_max: float,
+    kw_min: float,
+    kw_max: float,
+    rrf_k: int = 60,
+) -> float:
+    """Compute fused score given raw scores and weights."""
+    vec_range = vec_max - vec_min or 1.0
+    norm_vec = 1.0 - (vec_raw - vec_min) / vec_range  # distance → similarity
+
+    kw_range = kw_max - kw_min or 1.0
+    norm_kw = (kw_raw - kw_min) / kw_range
+
+    rrf_bonus = 1.0 / (rrf_k + kw_rank + 1) if kw_rank >= 0 else 0.0
+    max_rrf = 1.0 / (rrf_k + 1)
+
+    return alpha * norm_vec + beta * norm_kw + gamma * (rrf_bonus / max_rrf)
 
 
-def _text_overlap(text1: str, text2: str, threshold: float = 0.5) -> bool:
-    """Check if two texts have significant token overlap."""
-    tokens1 = set(text1.lower().split())
-    tokens2 = set(text2.lower().split())
-    if not tokens1 or not tokens2:
-        return False
-    overlap = len(tokens1 & tokens2)
-    jaccard = overlap / len(tokens1 | tokens2)
-    return jaccard > threshold
+def compute_mrr(recalls: list[list[dict]], targets: list[str]) -> float:
+    """Compute MRR@5 given recall results and target answer texts."""
+    mrr = 0.0
+    for recall_list, target in zip(recalls, targets):
+        for rank, item in enumerate(recall_list[:TOP_K], 1):
+            if item.get("text", "").strip() == target.strip():
+                mrr += 1.0 / rank
+                break
+    return mrr / len(targets)
 
 
-def compute_mrr_at_k(dataset, results_by_case, alpha, beta, gamma):
-    """
-    Compute MRR@K given fusion weights.
-    dataset: list of {id, question, answer}
-    results_by_case: dict mapping case_id -> list of recall results with raw scores
-    """
-    reciprocal_ranks = []
+def text_similar(a: str, b: str) -> bool:
+    """Simple text similarity (exact for benchmark)."""
+    return a.strip() == b.strip()
 
-    for case in dataset:
-        case_id = case["id"]
-        answer = case["answer"]
-        memories = results_by_case.get(case_id, [])
-        if not memories:
-            reciprocal_ranks.append(0.0)
+
+def run_grid_search():
+    print("Loading dataset...")
+    dataset = load_dataset()
+    answers = [d["answer"] for d in dataset]
+
+    print(f"Dataset: {len(dataset)} items")
+
+    # Phase 0: Load precomputed vectors (same as benchmark)
+    print("\n[Phase 0] Loading precomputed query vectors...")
+    cache_path = Path(__file__).parent.parent / "data" / "query_embeddings_cache.jsonl"
+    qvec_map = load_precomputed_vectors(str(cache_path))
+    print(f"  Loaded {len(qvec_map)} precomputed vectors")
+
+    # Phase 0b: Ensure benchmark memories are in DB via /direct_capture
+    print("\n[Phase 0b] Capturing benchmark memories via /direct_capture...")
+    direct_cap_url = "http://127.0.0.1:18360/direct_capture"
+    captured = 0
+    for d in dataset:
+        answer = d.get("answer") or d.get("memory_text") or ""
+        if not answer:
+            continue
+        body = {
+            "memories": [{
+                "text": answer,
+                "category": "other",
+                "importance": 1.0,
+                "name": "",
+                "description": "",
+                "metadata": {"question": d.get("question", "")},
+            }],
+            "session_id": f"bm-gridsearch",
+            "platform": "hermes",
+            "agent_id": "eval",
+        }
+        r = requests.post(direct_cap_url, json=body, timeout=10)
+        if r.status_code in (200, 201):
+            captured += 1
+    print(f"  ✅ Captured {captured}/{len(dataset)} memories")
+
+    # Phase 1: collect all raw scores (using precomputed vectors like benchmark)
+    print("\n[Phase 1] Fetching raw scores from recall_debug (with precomputed vectors)...")
+    all_raw: list[list[dict]] = []
+    for i, d in enumerate(dataset):
+        q = d["question"]
+        qid = d.get("id", f"q-{i}")
+        qvec = qvec_map.get(qid)
+        print(f"  [{i+1}/{len(dataset)}] {q[:50]}... vec={'YES' if qvec else 'MISSING'}")
+        items = recall_with_scores(q, top_k=20, query_vector=qvec)
+        all_raw.append(items)
+
+    # Collect global min/max for normalization
+    all_vec = [m["vector_score_raw"] for items in all_raw for m in items if m.get("vector_score_raw", -999) != -999]
+    all_kw = [m["keyword_score_raw"] for items in all_raw for m in items if m.get("keyword_score_raw", -999) != -999]
+    vec_min, vec_max = min(all_vec), max(all_vec)
+    kw_min, kw_max = min(all_kw), max(all_kw)
+    print(f"  vec range: [{vec_min:.4f}, {vec_max:.4f}]")
+    print(f"  kw range:  [{kw_min:.4f}, {kw_max:.4f}]")
+
+    # Phase 2: grid search
+    print("\n[Phase 2] Grid search fusion weights...")
+
+    # Weight grid (skip invalid combos where α+β+γ != 1.0 approximately)
+    alphas = [0.50, 0.60, 0.70, 0.75, 0.80]
+    betas = [0.10, 0.15, 0.20, 0.25]
+    gammas = [0.05, 0.10, 0.15]
+
+    results = []
+    for alpha, beta, gamma in itertools.product(alphas, betas, gammas):
+        # Skip combos that don't sum to ~1.0 (allow small tolerance)
+        if abs(alpha + beta + gamma - 1.0) > 0.01:
             continue
 
-        # Sort by fused score
-        scored = [
-            (mem, fused_score(
-                mem.get("vector_score_raw", 0.0),
-                mem.get("keyword_score_raw", 0.0),
-                mem.get("keyword_rank", -1),
-                alpha, beta, gamma
-            ))
-            for mem in memories
-        ]
-        scored.sort(key=lambda x: x[1], reverse=True)
+        # Compute fused scores for each item's candidate list
+        fused_rankings = []
+        for items in all_raw:
+            scored = []
+            for m in items:
+                kw_rank = m.get("keyword_rank", -1)
+                fs = fused_score(
+                    vec_raw=m.get("vector_score_raw", 0.0),
+                    kw_raw=m.get("keyword_score_raw", 0.0),
+                    kw_rank=kw_rank,
+                    alpha=alpha,
+                    beta=beta,
+                    gamma=gamma,
+                    vec_min=vec_min,
+                    vec_max=vec_max,
+                    kw_min=kw_min,
+                    kw_max=kw_max,
+                )
+                scored.append((fs, m))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            fused_rankings.append([m for _, m in scored[:TOP_K]])
 
-        # Find rank of ground truth using text similarity
-        for rank, (mem, _) in enumerate(scored, 1):
-            if _text_overlap(mem.get("text", ""), answer, threshold=0.5):
-                reciprocal_ranks.append(1.0 / rank)
-                break
-        else:
-            reciprocal_ranks.append(0.0)
+        mrr = compute_mrr(fused_rankings, answers)
+        results.append((mrr, alpha, beta, gamma))
+        print(f"  α={alpha:.2f} β={beta:.2f} γ={gamma:.2f} → MRR@5={mrr:.4f}")
 
-    if not reciprocal_ranks:
-        return 0.0
-    return sum(reciprocal_ranks) / len(reciprocal_ranks)
+    # Sort by MRR
+    results.sort(key=lambda x: x[0], reverse=True)
 
+    print("\n[Phase 3] Top 5 configurations:")
+    for mrr, a, b, g in results[:5]:
+        print(f"  MRR@5={mrr:.4f}  α={a:.2f} β={b:.2f} γ={g:.2f}")
 
-def main():
-    print(f"Loading dataset: {DATASET}")
-    dataset = load_dataset(DATASET)
-    print(f"Dataset size: {len(dataset)}")
-
-    # Collect raw scores for all cases
-    print("\nFetching recall_debug for all cases...")
-    results_by_case = {}
-    for i, case in enumerate(dataset):
-        case_id = case["id"]
-        question = case["question"]
-        print(f"  [{i+1}/{len(dataset)}] {case_id}: {question[:40]}...", end=" ", flush=True)
-
-        memories = fetch_recall_debug(question, top_k=TOP_K)
-        # Attach case_id to each memory for tracking
-        for m in memories:
-            m["case_id"] = case_id
-        results_by_case[case_id] = memories
-        print(f"→ {len(memories)} results")
-
-    # Save raw scores for offline grid search
-    raw_path = "reports/fusion_grid_search_raw.json"
-    with open(raw_path, "w") as f:
-        json.dump(results_by_case, f, ensure_ascii=False)
-    print(f"\nRaw scores saved to {raw_path}")
-
-    # Grid search
-    print("\nRunning grid search...")
-    best_mrr = 0.0
-    best_weights = None
-
-    # Alpha range: 0.0 to 1.0 step 0.1
-    # Beta range: 0.0 to 1.0 step 0.1
-    # Gamma = 1 - alpha - beta (normalized)
-    grid_points = []
-    for alpha in [round(x * 0.1, 1) for x in range(0, 11)]:  # 0.0 to 1.0
-        for beta in [round(x * 0.1, 1) for x in range(0, int((1.0 - alpha) * 10) + 1)]:
-            gamma = round(1.0 - alpha - beta, 2)
-            if gamma < 0:
-                gamma = 0.0
-            grid_points.append((round(alpha, 1), round(beta, 1), gamma))
-
-    print(f"Grid points: {len(grid_points)}")
-    for alpha, beta, gamma in grid_points:
-        mrr = compute_mrr_at_k(dataset, results_by_case, alpha, beta, gamma)
-        if mrr > best_mrr:
-            best_mrr = mrr
-            best_weights = (alpha, beta, gamma)
-            print(f"  NEW BEST: α={alpha:.1f} β={beta:.1f} γ={gamma:.2f} → MRR@{TOP_K}={mrr:.4f}")
-
-    print(f"\n{'='*60}")
-    print(f"Best weights: α={best_weights[0]:.1f} β={best_weights[1]:.1f} γ={best_weights[2]:.2f}")
-    print(f"Best MRR@{TOP_K}: {best_mrr:.4f}")
-    print(f"{'='*60}")
+    best_mrr, best_alpha, best_beta, best_gamma = results[0]
+    print(f"\n✅ Best: α={best_alpha:.2f} β={best_beta:.2f} γ={best_gamma:.2f} → MRR@5={best_mrr:.4f}")
 
     # Save results
     output = {
-        "best_weights": {"alpha": best_weights[0], "beta": best_weights[1], "gamma": best_weights[2]},
-        "best_mrr": best_mrr,
-        "grid_size": len(grid_points),
-        "dataset_size": len(dataset),
+        "best": {"alpha": best_alpha, "beta": best_beta, "gamma": best_gamma, "mrr@5": best_mrr},
+        "all_results": [
+            {"alpha": a, "beta": b, "gamma": g, "mrr@5": mrr}
+            for mrr, a, b, g in results
+        ],
     }
-    with open("reports/fusion_grid_search_result.json", "w") as f:
+    out_path = Path(__file__).parent.parent / "reports" / "fusion_grid_search.json"
+    out_path.parent.mkdir(exist_ok=True)
+    with open(out_path, "w") as f:
         json.dump(output, f, indent=2)
-    print(f"\nResults saved to reports/fusion_grid_search_result.json")
-
-    # Also compute baseline MRR with current weights
-    print("\nBaseline comparison (current weights):")
-    for alpha, beta, gamma in [(0.75, 0.15, 0.10), (0.60, 0.30, 0.10), (0.50, 0.50, 0.00)]:
-        mrr = compute_mrr_at_k(dataset, results_by_case, alpha, beta, gamma)
-        print(f"  α={alpha:.2f} β={beta:.2f} γ={gamma:.2f} → MRR@{TOP_K}={mrr:.4f}")
+    print(f"\nResults saved to {out_path}")
+    return best_alpha, best_beta, best_gamma, best_mrr
 
 
 if __name__ == "__main__":
-    main()
+    run_grid_search()
