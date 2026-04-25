@@ -62,7 +62,10 @@ precompute:
 		--output data/query_embeddings_cache.json
 
 benchmark-preflight:
-	@echo "[preflight] 运行 benchmark 前置检查..."
+	@echo "[preflight] 1/2 调用 hawk-memory-api 内置预检..."
+	@/home/gql/venv/bin/python /home/gql/repos/hawk-memory-api/scripts/pre_flight_check.py 2>&1
+	@echo ""
+	@echo "[preflight] 2/2 运行 benchmark 前置检查..."
 	@PYTHONPATH=src $(PYTHON) scripts/benchmark_preflight.py
 
 benchmark-hawk-quick:
