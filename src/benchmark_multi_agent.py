@@ -123,15 +123,22 @@ def main():
 
         # 2. Capture dataset with this agent_id
         log(f"[{agent_id}] Capture {len(dataset)} 条记忆 (agent={agent_id})...")
-        session_data = bm.capture_dataset(dataset, top_k=args.top_k, log_fn=log,
-                                          use_llm=False, rewrite=args.rewrite, agent_id=agent_id)
+        stored, total, memory_ids, session_items = bm.direct_capture_batch_with_ids(dataset, agent_id=agent_id)
+        log(f"[{agent_id}] 已 capture {stored}/{total} 条")
+
+        # session_items 包含预计算的 query_vector（用于 recall_eval）
+        session_data = {
+            "platform": bm.platform,
+            "count": stored,
+            "items": session_items,
+        }
 
         time.sleep(3)  # Wait for index
 
-        # 3. Recall + evaluate
+        # 3. Recall + evaluate（用预计算的 session_items）
         log(f"[{agent_id}] Recall 评测...")
-        results, metrics = bm.recall_eval(dataset, top_k=args.top_k, log_fn=log,
-                                           rewrite=args.rewrite, agent_id=agent_id)
+        results, metrics = bm.recall_eval(session_data["items"], top_k=args.top_k, log_fn=log,
+                                           agent_id=agent_id)
 
         log(f"[{agent_id}] MRR@5={metrics.get('mrr@5', 0):.3f}  Recall@5={metrics.get('recall@5', 0):.1%}  "
             f"Latency={metrics.get('latency_p50', 0):.2f}s")
