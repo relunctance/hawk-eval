@@ -17,7 +17,7 @@ LoCoMo-10 Recall Benchmark
 
 环境变量:
     OPENAI_API_KEY   LLM-Judge 使用 GPT-4o-mini（可选）
-    HAWK_API_BASE    hawk-memory-api 地址（默认 http://127.0.0.1:18360）
+    HAWK_API_BASE    hawk-memory Go 地址（默认 http://127.0.0.1:18368）
 """
 
 import argparse
@@ -45,7 +45,7 @@ except Exception:
 
 # ─── HTTP ───────────────────────────────────────────────────────────────────
 
-HAWK_BASE = os.getenv("HAWK_API_BASE", "http://127.0.0.1:18360")
+HAWK_BASE = os.getenv("HAWK_API_BASE", "http://127.0.0.1:18368")
 
 
 def hawk_req(method, path, body=None, timeout=30):
@@ -277,13 +277,13 @@ class HawkMemoryLocomoBenchmark:
             "response": answer,
             "platform": "locomo-benchmark",
         }
-        data, s = hawk_req("POST", "/capture", body)
+        data, s = hawk_req("POST", "/v1/capture", body)
         return s in (200, 201)
 
     def recall(self, query: str, top_k: int = 10) -> tuple[list[dict], float]:
         body = {"query": query, "top_k": top_k, "platform": "locomo-benchmark"}
         t0 = time.perf_counter()
-        data, s = hawk_req("POST", "/recall", body)
+        data, s = hawk_req("POST", "/v1/recall", body)
         latency = time.perf_counter() - t0
         self.latencies.append(latency)
         if s != 200:

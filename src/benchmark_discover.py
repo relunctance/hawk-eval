@@ -22,7 +22,7 @@ from typing import Any
 
 # ─── HTTP Client ─────────────────────────────────────────────────────────────────
 
-API_BASE = "http://127.0.0.1:18360"
+API_BASE = "http://127.0.0.1:18368"
 
 
 def http_post(path: str, body: dict) -> dict:

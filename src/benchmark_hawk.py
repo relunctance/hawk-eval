@@ -284,7 +284,7 @@ class HawkMemoryBenchmark:
 
         def send_batch(batch: list[dict]) -> tuple[int, list[str]]:
             body = {"memories": batch}
-            data, s = req("POST", "/v1/capture", body)
+            data, s = req("POST", "/v1/capture/batch", body)
             if s in (200, 201):
                 ids = data.get("memory_ids", [])
                 return data.get("stored", 0), ids
@@ -343,7 +343,7 @@ class HawkMemoryBenchmark:
             """Returns (stored_count, list of (original_idx, memory_id))"""
             memories = [m for _, m in batch]
             body = {"memories": memories}
-            data, s = req("POST", "/v1/capture", body)
+            data, s = req("POST", "/v1/capture/batch", body)
             if s in (200, 201):
                 ids = data.get("memory_ids", [])
                 return data.get("stored", 0), list(zip([idx for idx, _ in batch], ids))
@@ -495,15 +495,16 @@ class HawkMemoryBenchmark:
                         break
 
             # Fallback: text similarity (for sessions created before memory_id was added)
+            # Go binary returns Text (capital T), not text — try both
             if rank is None and target_text:
-                retrieved_texts = [m.get("text", "") for m in memories]
+                retrieved_texts = [m.get("text") or m.get("Text", "") for m in memories]
                 for pos, txt in enumerate(retrieved_texts):
                     if text_similar(txt, target_text):
                         rank = pos + 1
                         match_method = "text"
                         break
 
-            retrieved_texts = [m.get("text", "") for m in memories]
+            retrieved_texts = [m.get("text") or m.get("Text", "") for m in memories]
             bleu1 = 0.0
             f1 = 0.0
             if retrieved_texts and target_text:

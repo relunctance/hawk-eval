@@ -23,7 +23,7 @@ from typing import Any
 
 # ─── HTTP Client ─────────────────────────────────────────────────────────────────
 
-API_BASE = "http://127.0.0.1:18360"
+API_BASE = "http://127.0.0.1:18368"
 
 def http_post(path: str, body: dict) -> dict:
     import urllib.request
@@ -172,14 +172,14 @@ def seed_rules():
     ]
 
     # Get current rules and clear them
-    existing = http_post("/rules", {})
+    existing = http_post("/v1/rules", {})
     for rule in existing.get("rules", []):
-        http_post(f"/rules/{rule['id']}", {"delete": True})
+        http_post(f"/v1/rules/{rule['id']}", {"delete": True})
 
     # Create new rules
     created = 0
     for rule in rules:
-        resp = http_post("/rules", rule)
+        resp = http_post("/v1/rules", rule)
         if "error" not in resp:
             created += 1
     print(f"[benchmark_trigger] Seeded {created}/{len(rules)} rules")
@@ -233,7 +233,7 @@ def benchmark_trigger(dataset_name: str, rules_seed: bool = False) -> dict[str, 
         case_id = case.get("id", "??")
 
         start = time.time()
-        resp = http_post("/rules/evaluate", {"query": query, "include_negative": True})
+        resp = http_post("/v1/rules/evaluate", {"query": query, "include_negative": True})
         latency_ms = (time.time() - start) * 1000
         latencies.append(latency_ms)
 
