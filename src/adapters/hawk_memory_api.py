@@ -1,5 +1,5 @@
 """
-Adapter: hawk-memory-api
+Adapter: hawk-memory (Go native)
 """
 
 import json
@@ -13,14 +13,14 @@ from typing import Any
 @dataclass
 class HawkMemoryAdapter:
     """
-    连接到本地 hawk-memory-api 进行 recall 评测。
+    连接到 hawk-memory Go binary 进行 recall 评测。
 
     用法:
-        adapter = HawkMemoryAdapter(base_url="http://127.0.0.1:18360")
+        adapter = HawkMemoryAdapter(base_url="http://127.0.0.1:18368")
         result = adapter.recall("Python 编程", top_k=10)
     """
 
-    base_url: str = "http://127.0.0.1:18360"
+    base_url: str = "http://127.0.0.1:18368"
     timeout: int = 10
     platform: str = "eval"
     latency_results: list[float] = field(default_factory=list)
@@ -43,26 +43,20 @@ class HawkMemoryAdapter:
         """
         存入一条记忆。
 
-        支持两种模式：
-        - legacy: text=待存储文本（作为 message，response 为空）
-        - qa:     question + answer 作为完整对话存储
-                 → 存储 "用户: {question}" 和 "助手: {answer}"
-                 → recall(query=question) 时可匹配到含 answer 的记忆
+        - legacy: text 作为记忆文本
+        - qa: question + answer 拼接存储，recall(question) 时可匹配
         """
+        # Go 版本用 text 字段
         body = {
             "session_id": session_id,
             "user_id": user_id,
             "platform": self.platform,
         }
         if question is not None and answer is not None:
-            # QA 模式：存储完整对话
-            body["message"] = question
-            body["response"] = answer
+            body["text"] = f"用户: {question}\n助手: {answer}"
         else:
-            # Legacy 模式：text 作为 message
-            body["message"] = text
-            body["response"] = ""
-        data, _ = self._req("POST", "/capture", body)
+            body["text"] = text
+        data, _ = self._req("POST", "/v1/capture", body)
         return data
 
     def recall(
@@ -75,34 +69,44 @@ class HawkMemoryAdapter:
         """
         执行 recall，返回 {"memories": [...], "latency": float}
 
-        memories 每项包含 id / text / score / category
-
-        Args:
-            rewrite: if True, use LLM query rewriting before search (KR2.4)
+        memories 每项包含 id / text / score / agent_id
         """
-        body = {"query": query, "top_k": top_k, "rewrite": rewrite}
+        body = {"query": query, "top_k": top_k}
         if platform:
             body["platform"] = platform
         else:
             body["platform"] = self.platform
 
         t0 = time.perf_counter()
-        data, status = self._req("POST", "/recall", body)
+        data, status = self._req("POST", "/v1/recall", body)
         latency = time.perf_counter() - t0
         self.latency_results.append(latency)
 
         if status != 200:
             return {"memories": [], "error": data, "latency": latency}
 
+        # Go 版本返回 {memories: [{id,text,score,agent_id},...], count, total}
+        raw_memories = data.get("memories", [])
+        memories = []
+        for m in raw_memories:
+            memories.append({
+                "id": m.get("id") or m.get("ID", ""),
+                "text": m.get("text") or m.get("Text", ""),
+                "score": m.get("score") or m.get("Score", 0),
+                "agent_id": m.get("agent_id") or m.get("AgentID", ""),
+                "metadata": m.get("metadata") or m.get("Metadata", None),
+            })
+
         return {
-            "memories": data.get("memories", []),
+            "memories": memories,
             "count": data.get("count", 0),
+            "total": data.get("total", 0),
             "latency": latency,
         }
 
     def get_stats(self) -> dict:
         """获取统计信息。"""
-        data, _ = self._req("GET", "/stats")
+        data, _ = self._req("GET", "/admin/usage_stats")
         return data
 
     def latency_stats(self) -> dict[str, float]:

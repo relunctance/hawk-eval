@@ -38,7 +38,7 @@ from metrics import compute_recall_metrics, compute_text_metrics
 
 # ─── HTTP ───────────────────────────────────────────────────────────────────
 
-BASE = "http://127.0.0.1:18360"
+BASE = "http://127.0.0.1:18368"  # hawk-memory Go binary (was hawk-memory-api Python)
 
 DEFAULT_CACHE = "data/query_embeddings_cache.json"
 
@@ -172,7 +172,7 @@ class HawkMemoryBenchmark:
             "platform": self.platform,
         }
         for attempt in range(retries + 1):
-            data, s = req("POST", "/capture", body)
+            data, s = req("POST", "/v1/capture", body)
             if s in (200, 201):
                 return True
             if attempt < retries:
@@ -180,27 +180,21 @@ class HawkMemoryBenchmark:
         return False
 
     def capture(self, text: str) -> bool:
-        """存入一条记忆（兼容旧接口）。"""
+        """存入一条记忆（Go binary: text 字段）。"""
         session = f"bm-{uuid.uuid4().hex[:8]}"
         body = {
             "session_id": session,
             "user_id": "benchmark",
-            "message": text,
-            "response": "",
+            "text": text,
             "platform": self.platform,
         }
-        data, s = req("POST", "/capture", body)
+        data, s = req("POST", "/v1/capture", body)
         return s in (200, 201)
 
-    def capture_batch(self, items: list[dict], batch_size: int = 50, max_workers: int = 4) -> tuple[int, int]:
+    def capture_batch(self, items: list[dict], batch_size: int = 50, max_workers: int = 4,
+                     agent_id: str = "benchmark") -> tuple[int, int]:
         """
-        批量 capture QA 对，使用 /capture/batch 端点（server-side batch embedding + parallel LLM extraction）。
-
-        相比逐条 /capture：
-        - 1 个 HTTP 请求携带多个 items
-        - Server 端并行 LLM extraction（asyncio.gather）
-        - Server 端批量 embedding（embed_texts 一次请求 xinference）
-        - 大幅减少 HTTP RTT 开销
+        批量 capture QA 对，使用 Go /v1/capture/batch 端点。
 
         Args:
             items: list of dicts with 'question' and 'answer' (or 'memory_text') keys
@@ -210,35 +204,34 @@ class HawkMemoryBenchmark:
         Returns:
             (success_count, total_count)
         """
-        # Build batch items (filter out empty question/answer)
-        batch_items = []
+        # Build memories in Go format: {text, agent_id, metadata}
+        memories = []
         for item in items:
-            question = item.get("question", "")
             answer = item.get("answer") or item.get("memory_text") or ""
-            if question and answer:
-                batch_items.append({
-                    "session_id": f"bm-{uuid.uuid4().hex[:8]}",
-                    "user_id": "benchmark",
-                    "message": question,
-                    "response": answer,
-                    "platform": self.platform,
-                })
+            question = item.get("question", "")
+            if not answer:
+                continue
+            memories.append({
+                "text": f"用户: {question}\n助手: {answer}" if question else answer,
+                "agent_id": agent_id,
+                "metadata": {"question": question},
+            })
 
-        if not batch_items:
+        if not memories:
             return 0, len(items)
 
-        total = len(batch_items)
+        total = len(memories)
         captured = 0
 
         def send_batch(batch: list[dict]) -> int:
-            body = {"items": batch}
-            data, s = req("POST", "/capture/batch", body)
+            body = {"memories": batch}
+            data, s = req("POST", "/v1/capture/batch", body)
             if s in (200, 201):
                 return data.get("stored", 0)
             return 0
 
         # Split into batches and process concurrently
-        batches = [batch_items[i:i + batch_size] for i in range(0, len(batch_items), batch_size)]
+        batches = [memories[i:i + batch_size] for i in range(0, len(memories), batch_size)]
 
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
             futures = {ex.submit(send_batch, batch): len(batch) for batch in batches}
@@ -290,13 +283,8 @@ class HawkMemoryBenchmark:
         total = len(memories)
 
         def send_batch(batch: list[dict]) -> tuple[int, list[str]]:
-            body = {
-                "memories": batch,
-                "session_id": f"bm-{uuid.uuid4().hex[:8]}",
-                "platform": self.platform,
-                "agent_id": agent_id,
-            }
-            data, s = req("POST", "/direct_capture", body)
+            body = {"memories": batch}
+            data, s = req("POST", "/v1/capture", body)
             if s in (200, 201):
                 ids = data.get("memory_ids", [])
                 return data.get("stored", 0), ids
@@ -354,13 +342,8 @@ class HawkMemoryBenchmark:
         def send_batch(batch: list[tuple[int, dict]]) -> tuple[int, list[tuple[int, str]]]:
             """Returns (stored_count, list of (original_idx, memory_id))"""
             memories = [m for _, m in batch]
-            body = {
-                "memories": memories,
-                "session_id": f"bm-{uuid.uuid4().hex[:8]}",
-                "platform": self.platform,
-                "agent_id": agent_id,
-            }
-            data, s = req("POST", "/direct_capture", body)
+            body = {"memories": memories}
+            data, s = req("POST", "/v1/capture", body)
             if s in (200, 201):
                 ids = data.get("memory_ids", [])
                 return data.get("stored", 0), list(zip([idx for idx, _ in batch], ids))
@@ -416,7 +399,7 @@ class HawkMemoryBenchmark:
         if query_vector is not None:
             body["query_vector"] = query_vector
         t0 = time.perf_counter()
-        data, s = req("POST", "/recall", body)
+        data, s = req("POST", "/v1/recall", body)
         latency = time.perf_counter() - t0
         self.latencies.append(latency)
         if s != 200:
@@ -443,6 +426,9 @@ class HawkMemoryBenchmark:
 
         mode_str = "LLM extraction" if use_llm else "direct (no LLM)"
         log_fn(f"  [capture] {len(dataset)} 条记忆（{mode_str}）...")
+
+        # Go binary 不支持 LLM extraction，强制 direct
+        use_llm = False
 
         # 1) capture (use LLM or not based on flag)
         t0 = time.time()
@@ -577,6 +563,9 @@ class HawkMemoryBenchmark:
         if log_fn is None:
             log_fn = print
 
+        # Go binary 不支持 LLM extraction，强制 direct
+        use_llm = False
+
         mode_str = "LLM extraction" if use_llm else "direct (no LLM)"
         log_fn(f"  [1] Capture {len(dataset)} 条记忆（{mode_str}）...")
         t0 = time.time()
@@ -661,7 +650,7 @@ class HawkMemoryBenchmark:
         else:
             log_print("⚠️  FTS index 状态: 未建立或不可用")
             log_print(f"   详情: {fts_status.get('details')}")
-            log_print("   建议: curl -X POST http://127.0.0.1:18360/restart  重建索引")
+            log_print("   建议: curl -X POST http://127.0.0.1:18368/restart  重建索引")
 
         # 尝试加载预计算缓存
         cache = None
@@ -745,7 +734,7 @@ if __name__ == "__main__":
                        help="只跑前N条（0=全部）")
     parser.add_argument("--offset", type=int, default=0,
                        help="从第几条开始跳过（0=从头）")
-    parser.add_argument("--host", default="http://127.0.0.1:18360")
+    parser.add_argument("--host", default="http://127.0.0.1:18368")
     parser.add_argument("--mode", default="both",
                        choices=["capture", "recall", "both"],
                        help="capture=只 capture 数据集；recall=只评测 recall；both=两者都做（默认）")
