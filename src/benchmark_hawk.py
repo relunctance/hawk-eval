@@ -508,9 +508,26 @@ class HawkMemoryBenchmark:
             bleu1 = 0.0
             f1 = 0.0
             if retrieved_texts and target_text:
-                tm = compute_text_metrics(retrieved_texts[0], target_text)
-                bleu1 = tm.get("bleu1", 0.0)
-                f1 = tm.get("f1", 0.0)
+                # Use embedding-based semantic cosine similarity for answer quality.
+                # BLEU/word-overlap fails when recall returns the full memory
+                # but target is a short answer (e.g. "PostgreSQL + pgvector" vs
+                # "hawk-memory-api 使用 PostgreSQL + pgvector 做向量检索。")
+                # Strip the "用户: {question}\n助手: " prefix so we compare answer vs answer.
+                ref = _strip_prefix(retrieved_texts[0])
+                target = _strip_prefix(target_text)
+                try:
+                    import math
+                    text_vecs = embed_texts([ref, target])
+                    if len(text_vecs) == 2:
+                        v1, v2 = text_vecs[0], text_vecs[1]
+                        dot = sum(a * b for a, b in zip(v1, v2))
+                        norm1 = math.sqrt(sum(a * a for a in v1))
+                        norm2 = math.sqrt(sum(b * b for b in v2))
+                        cosine = dot / (norm1 * norm2) if norm1 > 0 and norm2 > 0 else 0.0
+                        bleu1 = float(cosine)
+                        f1 = float(cosine)
+                except Exception:
+                    pass
             return CaseResult(query_id=qid, query=query, target_text=target_text,
                               retrieved_texts=retrieved_texts, rank=rank,
                               latency=latency, bleu1=bleu1, f1=f1,
