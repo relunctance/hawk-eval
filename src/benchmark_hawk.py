@@ -283,7 +283,7 @@ class HawkMemoryBenchmark:
         total = len(memories)
 
         def send_batch(batch: list[dict]) -> tuple[int, list[str]]:
-            body = {"memories": batch}
+            body = {"memories": batch, "agent_id": agent_id}
             data, s = req("POST", "/v1/capture/batch", body)
             if s in (200, 201):
                 ids = data.get("memory_ids", [])
@@ -342,7 +342,7 @@ class HawkMemoryBenchmark:
         def send_batch(batch: list[tuple[int, dict]]) -> tuple[int, list[tuple[int, str]]]:
             """Returns (stored_count, list of (original_idx, memory_id))"""
             memories = [m for _, m in batch]
-            body = {"memories": memories}
+            body = {"memories": memories, "agent_id": agent_id}
             data, s = req("POST", "/v1/capture/batch", body)
             if s in (200, 201):
                 ids = data.get("memory_ids", [])

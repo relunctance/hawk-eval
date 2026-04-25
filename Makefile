@@ -48,8 +48,8 @@ test-self-check:
 
 # ─── Hawk Memory API Benchmarks ───────────────────────────────────────────────
 
-benchmark-hawk: benchmark-preflight
-	@echo "[benchmark] hawk-memory-api recall benchmark..."
+benchmark-hawk:
+	@echo "[benchmark] hawk-memory Go service recall benchmark..."
 	@mkdir -p reports
 	@PYTHONPATH=src $(PYTHON) -m src.benchmark_hawk \
 		--dataset datasets/hawk_memory/conversational_qa.jsonl \
@@ -77,10 +77,11 @@ benchmark-hawk-quick:
 		--output reports/hawk_recall_quick.json
 
 benchmark-hawk-clean:
-	@echo "[clean] 清理 eval 残留数据 + 跑 benchmark..."
-	@curl -s -X POST "http://127.0.0.1:18360/admin/cleanup" \
-		-H "Content-Type: application/json" \
-		-d '{"agent_id":"eval"}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'已清理 {d.get(\"deleted\",0)} 条 eval 记忆')"
+	@echo "[clean] 清理 eval 记忆 + 跑 benchmark..."
+	@for id in $$(curl -s http://127.0.0.1:18368/v1/memories/recent?agent_id=eval&limit=100 2>/dev/null | python3 -c "import sys,json; print(' '.join([m['id'] for m in json.load(sys.stdin).get('memories',[])]))" 2>/dev/null); do \
+		curl -s -X DELETE "http://127.0.0.1:18368/v1/memory/$$id" 2>/dev/null; \
+	done
+	@echo "已清理 eval 记忆"
 	@mkdir -p reports
 	@PYTHONPATH=src $(PYTHON) -m src.benchmark_hawk \
 		--dataset datasets/hawk_memory/conversational_qa.jsonl \
