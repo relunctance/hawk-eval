@@ -162,7 +162,7 @@ def main():
         all_cases.extend([(agent_id, r) for r in results])
 
     # Compute aggregate metrics (no agent filter = all memories)
-    agg_metrics = compute_mrr_and_recall([r for _, r in all_cases])
+    agg_metrics = compute_mrr_and_recall([r.to_dict() for _, r in all_cases])
     log(f"Aggregate MRR@5={agg_metrics['mrr@5']:.3f}  Recall@5={agg_metrics['recall@5']:.1%}")
 
     # Save report
