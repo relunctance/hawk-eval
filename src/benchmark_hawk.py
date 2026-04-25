@@ -545,12 +545,15 @@ class HawkMemoryBenchmark:
                      if "-" in r.query_id else 0)
 
         # 计算汇总指标
-        # NOTE: must use _strip_prefix (module-level, handles \n-split + role prefix)
-        # not the local _strip above (only handles role prefix → would cause
-        # compute_recall_metrics exact-match to fail)
+        # 优先用 text_similar 匹配（capture 文本格式可能有细微差异：逗号/空格/换行）
+        # memory_id 精确匹配降级保留（当 use_llm=True 时 memory_ids 为空列表）
         metrics = compute_recall_metrics([
-            {"query_id": r.query_id, "target_id": _strip_prefix(r.target_text),
-             "retrieved_ids": [_strip_prefix(t) for t in r.retrieved_texts]}
+            {
+                "query_id": r.query_id,
+                "target_id": r.target_text,
+                "retrieved_ids": r.retrieved_texts,
+                "use_text_similarity": True,  # opt-in text_similar matching
+            }
             for r in results
         ], k_values=[1, 3, 5, 10])
 
@@ -611,7 +614,127 @@ class HawkMemoryBenchmark:
         return self.recall_eval(dataset, top_k=top_k, log_fn=log_fn, rewrite=rewrite, agent_id=agent_id)
 
 
-def main():
+    def check_fts_index(self) -> dict:
+        """检查 FTS index 状态，返回 {"has_fts": bool, "details": ...}"""
+        try:
+            resp, status = req("GET", "/admin/index_status")
+            if status == 200:
+                return resp
+            return {"has_fts": False, "details": f"HTTP {status}"}
+        except Exception as e:
+            return {"has_fts": False, "details": str(e)}
+
+    def main(self, args):
+        dataset = []
+        with open(args.dataset) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        dataset.append(json.loads(line))
+                    except:
+                        pass
+
+        if args.offset > 0:
+            dataset = dataset[args.offset:]
+        if args.limit > 0:
+            dataset = dataset[:args.limit]
+
+        from datetime import datetime
+        def log_print(*args, **kwargs):
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]", *args, **kwargs)
+
+        log_print(f"[benchmark] 数据集: {args.dataset} ({len(dataset)} 条)  mode={args.mode}")
+
+        bm = HawkMemoryBenchmark()
+
+        if not bm.health_check():
+            log_print("❌ hawk-memory-api health check failed")
+            return
+
+        log_print("✅ hawk-memory-api health OK")
+
+        # FTS index 检查
+        fts_status = bm.check_fts_index()
+        if fts_status.get("has_fts"):
+            log_print("✅ FTS index 状态: 已建立")
+        else:
+            log_print("⚠️  FTS index 状态: 未建立或不可用")
+            log_print(f"   详情: {fts_status.get('details')}")
+            log_print("   建议: curl -X POST http://127.0.0.1:18360/restart  重建索引")
+
+        # 尝试加载预计算缓存
+        cache = None
+        if args.mode in ("both", "recall"):
+            cache = load_cache(args.dataset)
+            if cache:
+                log_print(f"✅ 预计算缓存命中: {cache['count']} 条 (fingerprint: {cache.get('fingerprint', '?')})")
+            else:
+                log_print("⚠️  未找到预计算缓存，将实时计算 embedding（较慢）")
+                log_print("   运行: python scripts/precompute_query_embeddings.py --dataset ... 预计算缓存")
+
+        results = []
+        metrics = {}
+
+        if args.mode == "capture":
+            session_data = bm.capture_dataset(dataset, log_fn=log_print, use_llm=args.use_llm)
+            if args.session_file:
+                Path(args.session_file).parent.mkdir(parents=True, exist_ok=True)
+                with open(args.session_file, "w") as f:
+                    json.dump(session_data, f, ensure_ascii=False, indent=2)
+                log_print(f"✅ session 已保存: {args.session_file}")
+
+        if args.mode == "recall":
+            # recall-only: load from session file if provided
+            if args.session_file:
+                with open(args.session_file) as f:
+                    session_data = json.load(f)
+                dataset = session_data["items"]
+                log_print(f"[recall] 从 session 加载 {len(dataset)} 条（忽略 --offset/--limit）")
+            results, metrics = bm.recall_eval(dataset, top_k=args.top_k, log_fn=log_print, rewrite=args.rewrite, agent_id=args.agent)
+
+        if args.mode == "both":
+            # run() handles capture + recall internally
+            results, metrics = bm.run(dataset, top_k=args.top_k, log_fn=log_print, cache=cache, use_llm=args.use_llm, rewrite=args.rewrite, agent_id=args.agent)
+
+        if not results and metrics:
+            log_print("\n（capture-only 模式，无评测结果）")
+            return
+
+        # Save report
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        report = {
+            "dataset": args.dataset,
+            "mode": args.mode,
+            "agent": args.agent,
+            "rewrite": args.rewrite,
+            "count": len(results),
+            "metrics": metrics,
+            "cases": [r.to_dict() for r in results],
+        }
+        with open(args.output, "w") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+
+        # Print summary
+        log_print(f"\n{'='*50}")
+        log_print(f"  MRR@1:  {metrics.get('mrr@1', 0):.3f}")
+        log_print(f"  MRR@3:  {metrics.get('mrr@3', 0):.3f}")
+        log_print(f"  MRR@5:  {metrics.get('mrr@5', 0):.3f}")
+        log_print(f"  MRR@10: {metrics.get('mrr@10', 0):.3f}")
+        log_print(f"  Recall@1:  {metrics.get('recall@1', 0):.1%}")
+        log_print(f"  Recall@3:  {metrics.get('recall@3', 0):.1%}")
+        log_print(f"  Recall@5:  {metrics.get('recall@5', 0):.1%}")
+        log_print(f"  Recall@10: {metrics.get('recall@10', 0):.1%}")
+        log_print(f"  BLEU-1 avg: {metrics.get('bleu1_avg', 0):.3f}")
+        log_print(f"  F1 avg:      {metrics.get('f1_avg', 0):.3f}")
+        log_print(f"  Latency avg: {metrics.get('latency_avg', 0):.3f}s")
+        log_print(f"  Latency P50: {metrics.get('latency_p50', 0):.3f}s")
+        log_print(f"{'='*50}")
+        log_print(f"\n报告已保存: {args.output}")
+
+
+if __name__ == "__main__":
+    import argparse
     parser = argparse.ArgumentParser(description="hawk-memory-api recall benchmark")
     parser.add_argument("--dataset", default="datasets/hawk_memory/conversational_qa.jsonl",
                        help="JSONL dataset path")
@@ -639,105 +762,5 @@ def main():
     parser.set_defaults(use_llm=False, rewrite=False)
     args = parser.parse_args()
 
-    from datetime import datetime
-    def log_print(*args, **kwargs):
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]", *args, **kwargs)
-
-    # Load dataset
-    dataset = []
-    with open(args.dataset) as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                try:
-                    dataset.append(json.loads(line))
-                except:
-                    pass
-
-    if args.offset > 0:
-        dataset = dataset[args.offset:]
-    if args.limit > 0:
-        dataset = dataset[:args.limit]
-
-    log_print(f"[benchmark] 数据集: {args.dataset} ({len(dataset)} 条)  mode={args.mode}")
-
     bm = HawkMemoryBenchmark()
-
-    if not bm.health_check():
-        log_print("❌ hawk-memory-api health check failed")
-        return
-
-    log_print("✅ hawk-memory-api health OK")
-
-    # 尝试加载预计算缓存
-    cache = None
-    if args.mode in ("both", "recall"):
-        cache = load_cache(args.dataset)
-        if cache:
-            log_print(f"✅ 预计算缓存命中: {cache['count']} 条 (fingerprint: {cache.get('fingerprint', '?')})")
-        else:
-            log_print("⚠️  未找到预计算缓存，将实时计算 embedding（较慢）")
-            log_print("   运行: python scripts/precompute_query_embeddings.py --dataset ... 预计算缓存")
-
-    results = []
-    metrics = {}
-
-    if args.mode == "capture":
-        session_data = bm.capture_dataset(dataset, log_fn=log_print, use_llm=args.use_llm)
-        if args.session_file:
-            Path(args.session_file).parent.mkdir(parents=True, exist_ok=True)
-            with open(args.session_file, "w") as f:
-                json.dump(session_data, f, ensure_ascii=False, indent=2)
-            log_print(f"✅ session 已保存: {args.session_file}")
-
-    if args.mode == "recall":
-        # recall-only: load from session file if provided
-        if args.session_file:
-            with open(args.session_file) as f:
-                session_data = json.load(f)
-            dataset = session_data["items"]
-            log_print(f"[recall] 从 session 加载 {len(dataset)} 条（忽略 --offset/--limit）")
-        results, metrics = bm.recall_eval(dataset, top_k=args.top_k, log_fn=log_print, rewrite=args.rewrite, agent_id=args.agent)
-
-    if args.mode == "both":
-        # run() handles capture + recall internally
-        results, metrics = bm.run(dataset, top_k=args.top_k, log_fn=log_print, cache=cache, use_llm=args.use_llm, rewrite=args.rewrite, agent_id=args.agent)
-
-    if not results and metrics:
-        log_print("\n（capture-only 模式，无评测结果）")
-        return
-
-    # Save report
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    report = {
-        "dataset": args.dataset,
-        "mode": args.mode,
-        "agent": args.agent,
-        "rewrite": args.rewrite,
-        "count": len(results),
-        "metrics": metrics,
-        "cases": [r.to_dict() for r in results],
-    }
-    with open(args.output, "w") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
-
-    # Print summary
-    log_print(f"\n{'='*50}")
-    log_print(f"  MRR@1:  {metrics.get('mrr@1', 0):.3f}")
-    log_print(f"  MRR@3:  {metrics.get('mrr@3', 0):.3f}")
-    log_print(f"  MRR@5:  {metrics.get('mrr@5', 0):.3f}")
-    log_print(f"  MRR@10: {metrics.get('mrr@10', 0):.3f}")
-    log_print(f"  Recall@1:  {metrics.get('recall@1', 0):.1%}")
-    log_print(f"  Recall@3:  {metrics.get('recall@3', 0):.1%}")
-    log_print(f"  Recall@5:  {metrics.get('recall@5', 0):.1%}")
-    log_print(f"  Recall@10: {metrics.get('recall@10', 0):.1%}")
-    log_print(f"  BLEU-1 avg: {metrics.get('bleu1_avg', 0):.3f}")
-    log_print(f"  F1 avg:      {metrics.get('f1_avg', 0):.3f}")
-    log_print(f"  Latency avg: {metrics.get('latency_avg', 0):.3f}s")
-    log_print(f"  Latency P50: {metrics.get('latency_p50', 0):.3f}s")
-    log_print(f"{'='*50}")
-    log_print(f"\n报告已保存: {args.output}")
-
-
-if __name__ == "__main__":
-    main()
+    bm.main(args)
