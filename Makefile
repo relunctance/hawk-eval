@@ -1,4 +1,4 @@
-.PHONY: help test benchmark-hawk benchmark-hawk-proc benchmark-m-flow benchmark-locomo benchmark-evolving benchmark-all benchmark-multi-agent compare install benchmark-preflight benchmark-hawk-clean
+.PHONY: help test benchmark-hawk benchmark-hawk-proc benchmark-m-flow benchmark-locomo benchmark-evolving benchmark-all benchmark-multi-agent compare install benchmark-preflight benchmark-hawk-clean benchmark-trigger
 
 PYTHON := python3
 PYTEST := pytest
@@ -139,6 +139,13 @@ benchmark-multi-agent:
 		--dataset datasets/hawk_memory/conversational_qa.jsonl \
 		--agents user1,user2,user3 \
 		--output reports/multi_agent.json
+
+benchmark-trigger:
+	@echo "[benchmark] hawk trigger rules evaluation..."
+	@mkdir -p reports
+	@PYTHONPATH=src $(PYTHON) src/benchmark_trigger.py \
+		--rules-seed \
+		--output reports/trigger_$(VERSION).json
 
 # ─── 报告 ────────────────────────────────────────────────────────────────────
 
