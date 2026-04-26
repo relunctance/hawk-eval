@@ -6,14 +6,17 @@ from typing import Any
 
 
 def mean_reciprocal_rank(ranks: list[int | None]) -> float:
-    """计算 MRR。ranks 是每个 query 的目标排名（1-indexed），未命中为 None。"""
+    """计算 MRR。ranks 是每个 query 的目标排名（1-indexed），未命中为 None。
+    Standard MRR: sum(1/rank) over all queries / N (including unmatched=0).
+    """
+    if not ranks:
+        return 0.0
     score = 0.0
-    valid = 0
     for r in ranks:
         if r is not None and r > 0:
             score += 1.0 / r
-            valid += 1
-    return score / valid if valid > 0 else 0.0
+        # unmatched (None or 0) contributes 0
+    return score / len(ranks)
 
 
 def recall_at_k(ranks: list[int | None], k: int) -> float:
