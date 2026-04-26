@@ -244,7 +244,7 @@ class HawkMemoryBenchmark:
         return captured, total
 
     def direct_capture_batch(self, items: list[dict], batch_size: int = 50, max_workers: int = 4,
-                            agent_id: str = "eval") -> tuple[int, int]:
+                            agent_id: str = "benchmark") -> tuple[int, int]:
         """
         批量 direct capture，使用 /direct_capture 端点（完全绕过 LLM extraction）。
 
@@ -308,7 +308,7 @@ class HawkMemoryBenchmark:
         return stored, total, all_ids
 
     def direct_capture_batch_with_ids(self, items: list[dict], batch_size: int = 50, max_workers: int = 4,
-                                     agent_id: str = "eval") -> tuple[int, int, list[str], list[dict]]:
+                                     agent_id: str = "benchmark") -> tuple[int, int, list[str], list[dict]]:
         """
         批量 direct capture，返回每条记忆的 memory_id 和预计算的 query_vector（按原 items 顺序对齐）。
 
@@ -591,7 +591,7 @@ class HawkMemoryBenchmark:
             captured, total = self.capture_batch(dataset, batch_size=50, max_workers=4)
             memory_ids = []
         else:
-            captured, total, memory_ids, _session_items = self.direct_capture_batch_with_ids(dataset, batch_size=50, max_workers=4)
+            captured, total, memory_ids, _session_items = self.direct_capture_batch_with_ids(dataset, batch_size=50, max_workers=4, agent_id=agent_id)
         elapsed = time.time() - t0
         log_fn(f"      已 capture {captured}/{total} 条 ({elapsed:.1f}s)")
 

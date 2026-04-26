@@ -126,10 +126,10 @@ benchmark-hawk-quick:
 # 仅当不想清空全量数据但想跑干净 eval 时使用
 benchmark-hawk-clean:
 	@echo "[clean] 清理 eval 记忆 + 跑 benchmark..."
-	@for id in $$(curl -s http://127.0.0.1:18368/v1/memories/recent?agent_id=eval\&limit=100 2>/dev/null | python3 -c "import sys,json; print(' '.join([m['id'] for m in json.load(sys.stdin).get('memories',[])]))" 2>/dev/null); do \
+	@for id in $$(curl -s http://127.0.0.1:18368/v1/memories/recent?agent_id=benchmark\&limit=100 2>/dev/null | python3 -c "import sys,json; print(' '.join([m['id'] for m in json.load(sys.stdin).get('memories',[])]))" 2>/dev/null); do \
 		curl -s -X DELETE "http://127.0.0.1:18368/v1/memory/$$id" 2>/dev/null; \
 	done
-	@echo "已清理 eval 记忆（注意：DB 总量不变，旧数据可能影响 recall rank）"
+	@echo "已清理 benchmark 记忆（注意：DB 总量不变，旧数据可能影响 recall rank）"
 	@echo "推荐使用: make benchmark-hawk-init（清空整个 DB，保证绝对干净）"
 	@echo ""
 	@mkdir -p reports
