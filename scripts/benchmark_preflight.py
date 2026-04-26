@@ -24,7 +24,7 @@ import urllib.error
 from pathlib import Path
 
 
-BASE = "http://127.0.0.1:18360"
+BASE = "http://127.0.0.1:18368"  # hawk-memory Go binary
 EMBED_URL = "http://127.0.0.1:9997/v1/embeddings"
 EMBED_MODEL = "bge-m3"
 

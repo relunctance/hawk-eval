@@ -14,7 +14,7 @@ hawk-memory-api 集成测试套件
     pytest tests/ -v
     make test
 
-前提：hawk-memory-api 必须运行在 http://127.0.0.1:18360
+前提：hawk-memory Go binary 运行在 http://127.0.0.1:18368
 """
 
 import json
@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-BASE_URL = "http://127.0.0.1:18360"
+BASE_URL = "http://127.0.0.1:18368"
 
 
 def req(method: str, path: str, body: dict = None, timeout: float = 10) -> tuple[Any, int]:

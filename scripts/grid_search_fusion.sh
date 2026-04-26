@@ -14,7 +14,7 @@ EVAL_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$EVAL_DIR"
 
 HAWK_MEMORY_API_DIR="$HOME/repos/hawk-memory-api"
-API_URL="http://127.0.0.1:18360"
+API_URL="http://127.0.0.1:18368"
 REPORT_FILE="reports/grid_search.json"
 
 # Check if service is running

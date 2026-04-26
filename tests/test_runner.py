@@ -10,7 +10,7 @@ import sys
 import urllib.request
 import urllib.error
 
-BASE = "http://127.0.0.1:18360"
+BASE = "http://127.0.0.1:18368"  # hawk-memory Go binary
 
 
 def req(method, path, body=None, timeout=8):

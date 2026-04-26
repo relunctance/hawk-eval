@@ -19,7 +19,7 @@ from pathlib import Path
 import requests
 
 DATASET = Path(__file__).parent.parent / "datasets" / "hawk_memory" / "conversational_qa.jsonl"
-API_URL = "http://127.0.0.1:18360/recall_debug"
+API_URL = "http://127.0.0.1:18368/recall_debug"
 TOP_K = 5
 
 
@@ -74,7 +74,7 @@ def run_grid_search():
 
     # Ensure benchmark memories are in DB
     print("\n[Phase 1] Ensuring benchmark memories in DB via /direct_capture...")
-    direct_cap_url = "http://127.0.0.1:18360/direct_capture"
+    direct_cap_url = "http://127.0.0.1:18368/direct_capture"
     captured = 0
     for d in dataset:
         answer = d.get("answer") or d.get("memory_text") or ""
