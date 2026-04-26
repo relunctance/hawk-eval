@@ -436,7 +436,7 @@ class HawkMemoryBenchmark:
             ok, total = self.capture_batch(dataset, batch_size=50, max_workers=4)
             memory_ids = []  # LLM capture doesn't return per-item IDs yet
         else:
-            ok, total, memory_ids = self.direct_capture_batch_with_ids(dataset, batch_size=50, max_workers=4)
+            ok, total, memory_ids, _session_items = self.direct_capture_batch_with_ids(dataset, batch_size=50, max_workers=4)
         elapsed = time.time() - t0
         log_fn(f"      已 capture {ok}/{total} 条 ({elapsed:.1f}s)")
 
