@@ -162,7 +162,8 @@ def run_procedural_benchmark(
             resp = adapter.recall(query, top_k=top_k)
             memories = resp.get("memories", []) if isinstance(resp, dict) else []
             retrieved_ids = [m.get("id", "") for m in memories]
-            retrieved_titles = [m.get("title", m.get("text", "")[:50]) for m in memories]
+            # For hawk-memory: use full text for keyword matching (title field may not exist)
+            retrieved_titles = [m.get("text", "") for m in memories]
 
             # 检查是否触发
             should_trigger = expect.get("should_trigger_procedural", False)
